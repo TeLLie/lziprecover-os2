@@ -1,0 +1,52 @@
+Changes in version 1.21:
+
+The options '--dump', '--remove' and '--strip' have been added, mainly as
+support for the tarlz archive format: http://www.nongnu.org/lzip/tarlz.html
+These options replace '--dump-tdata', '--remove-tdata' and '--strip-tdata',
+which are now aliases and will be removed in version 1.22.
+
+  '--dump=[<member_list>][:damaged][:tdata]' dumps the members listed, the
+  damaged members (if any), or the trailing data (if any) of one or more
+  regular multimember files to standard output.
+
+  '--remove=[<member_list>][:damaged][:tdata]' removes the members listed,
+  the damaged members (if any), or the trailing data (if any) from regular
+  multimember files in place.
+
+  '--strip=[<member_list>][:damaged][:tdata]' copies one or more regular
+  multimember files to standard output, stripping the members listed, the
+  damaged members (if any), or the trailing data (if any) from each file.
+
+Detection of forbidden combinations of characters in trailing data has been
+improved.
+
+'--split' can now detect trailing data and gaps between members, and save
+each gap in its own file. Trailing data (if any) are saved alone in the last
+file. (Gaps may contain garbage or may be members with corrupt headers or
+trailers).
+
+'--ignore-errors' now makes '--list' show gaps between members, ignoring
+format errors.
+
+'--ignore-errors' now makes '--range-decompress' ignore a truncated last
+member.
+
+Errors are now also checked when closing the input file in decompression
+mode.
+
+Some diagnostic messages have been improved.
+
+'\n' is now printed instead of '\r' when showing progress of merge or repair
+if stdout is not a terminal.
+
+Lziprecover now compiles on DOS with DJGPP. (Patch from Robert Riebisch).
+
+The new chapter 'Tarlz', explaining the ways in which lziprecover can
+recover and process multimember tar.lz archives, has been added to the
+manual.
+
+The configure script now accepts appending options to CXXFLAGS using the
+syntax 'CXXFLAGS+=OPTIONS'.
+
+It has been documented in INSTALL the use of
+CXXFLAGS+='-D __USE_MINGW_ANSI_STDIO' when compiling on MinGW.

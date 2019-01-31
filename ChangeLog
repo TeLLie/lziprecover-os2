@@ -1,0 +1,199 @@
+2019-01-04  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.21 released.
+	* File_* renamed to Lzip_*.
+	* Added new options '--dump', '--remove' and '--strip'. They
+	  replace '--dump-tdata', '--remove-tdata' and '--strip-tdata',
+	  which are now aliases and will be removed in version 1.22.
+	* lzip.h (Lzip_trailer): New function 'verify_consistency'.
+	* lzip_index.cc: Lzip_index now detects gaps between members,
+	  some kinds of corrupt trailers and
+	  some fake trailers embedded in trailing data.
+	* split.cc: Use Lzip_index to split members, gaps and trailing data.
+	* split.cc: Verify last member before writing anything.
+	* list.cc (list_files): With '-i', ignore format errors, show gaps.
+	* range_dec.cc: With '-i', ignore a truncated last member.
+	* main.cc (main): Check return value of close( infd ).
+	* Improve and add new diagnostic messages.
+	* Print '\n' instead of '\r' if !isatty( 1 ) in merge, repair.
+	* main.cc: Compile on DOS with DJGPP.
+	* lziprecover.texi: Added chapter 'Tarlz'.
+	* configure: Accept appending to CXXFLAGS, 'CXXFLAGS+=OPTIONS'.
+	* INSTALL: Document use of CXXFLAGS+='-D __USE_MINGW_ANSI_STDIO'.
+	* Added new test files fox.lz fox6_sc[1-6].lz.
+
+2018-02-12  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.20 released.
+	* split.cc: Fixed splitting of files > 64 KiB broken since 1.16.
+	* Added new option '--dump-tdata'.
+	* Added new option '--remove-tdata'.
+	* Added new option '--strip-tdata'.
+	* Added new option '--loose-trailing'.
+	* Improved corrupt header detection to HD=3.
+	* main.cc: Show corrupt or truncated header in multimember file.
+	* Replaced 'bits/byte' with inverse compression ratio in output.
+	* Show progress of decompression at verbosity level 2 (-vv).
+	* Show progress of decompression only if stderr is a terminal.
+	* main.cc: Show final diagnostic when testing multiple files.
+	* decoder.cc (verify_trailer): Show stored sizes also in hex.
+	  Show dictionary size at verbosity level 4 (-vvvv).
+
+2017-04-10  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.19 released.
+	* merge.cc: Fix members with thousands of scattered errors.
+	* Option '-a' now works with '-l' and '-D'.
+	* The output of option '-l, --list' has been simplified.
+	* main.cc: Continue testing if any input file is a terminal.
+	* main.cc: Show trailing data in both hexadecimal and ASCII.
+	* lzip_index.cc: Improve detection of bad dict and trailing data.
+	* lzip_index.cc: Skip trailing data more efficiently.
+	* lzip.h: Unified messages for bad magic, trailing data, etc.
+	* New struct Bad_byte allows delta and flip modes for bad_value.
+	* unzcrash.cc: Added new option '-e, --set-byte'.
+
+2016-05-12  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.18 released.
+	* Added new option '-a, --trailing-error'.
+	* merge.cc (open_input_files): Use CRC to test identical files.
+	* repair.cc (repair_file): Detect gross damage before repairing.
+	* repair.cc: Repair a damaged dictionary size in the header.
+	* repair.cc: Try bytes at offsets 7 to 11 first.
+	* Decompression time has been reduced by 2%.
+	* main.cc (decompress): Print up to 6 bytes of trailing data
+	  when '-tvvvv' is specified.
+	* decoder.cc (verify_trailer): Removed test of final code.
+	* main.cc (main): Delete '--output' file if infd is a terminal.
+	* main.cc (main): Don't use stdin more than once.
+	* Use 'close_and_set_permissions' and 'set_signals' in all modes.
+	* range_dec.cc (list_file): Show dictionary size and size of
+	  trailing data (if any) with '-lv'.
+	* Added new option '-A, --alone-to-lz'.
+	* Added new option '-W, --debug-decompress'.
+	* Added new option '-X, --show-packets'.
+	* Changed short name of option '--debug-delay' to '-Y'.
+	* Changed short name of option '--debug-repair' to '-Z'.
+	* unzcrash.cc: Added new option '-B, --block'.
+	* unzcrash.cc: Added new option '-d, --delta'.
+	* unzcrash.cc: Added new option '-t, --truncate'.
+	* unzcrash.cc: Added new option '-z, --zcmp'.
+	* unzcrash.cc: Read files as large as RAM allows.
+	* unzcrash.cc: Compare output using zcmp if decompressor returns 0.
+	* unzcrash.cc: Accept negative position and size.
+	* lziprecover.texi: Added chapter 'Trailing data'.
+	* configure: Avoid warning on some shells when testing for g++.
+	* Makefile.in: Detect the existence of install-info.
+	* check.sh: Don't check error messages.
+	* check.sh: A POSIX shell is required to run the tests.
+
+2015-05-28  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.17 released.
+	* New block selection algorithm makes merge up to 100 times faster.
+	* repair.cc: Repair time has been reduced by 15%.
+	* Added new option '-y, --debug-delay'.
+	* Added new option '-z, --debug-repair'.
+	* Makefile.in: Added new targets 'install*-compress'.
+	* testsuite/unzcrash.cc: Moved to top directory.
+	* lziprecover.texi: Added chapter 'File names'.
+
+2014-08-29  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.16 released.
+	* New class LZ_mtester makes repair up to 10 times faster.
+	* main.cc (close_and_set_permissions): Behave like 'cp -p'.
+	* lziprecover.texinfo: Renamed to lziprecover.texi.
+	* License changed to GPL version 2 or later.
+
+2013-09-14  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.15 released.
+	* repair.cc: Repair multimember files with up to one byte error
+	  per member.
+	* merge.cc: Merge multimember files.
+	* main.cc (show_header): Don't show header version.
+	* lziprecover.texinfo: Added chapters 'Repairing files',
+	  'Merging files' and 'Unzcrash'.
+
+2013-05-31  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.14 released.
+	* Added new option '-i, --ignore-errors'.
+	* Option '-l, --list' now accepts more than one file.
+	* Decompression time has been reduced by 12%.
+	* split.cc: Use as few digits as possible in file names.
+	* split.cc: In verbose mode show names of files being created.
+	* main.cc (show_header): Show header version if verbosity >= 4.
+	* configure: Options now accept a separate argument.
+	* Makefile.in: Added new targets 'install-as-lzip', 'install-bin'.
+	* main.cc: Use 'setmode' instead of '_setmode' on Windows and OS/2.
+
+2012-02-24  Antonio Diaz Diaz  <ant_diaz@teleline.es>
+
+	* Version 1.13 released.
+	* Lziprecover is now distributed in its own package. Until
+	  version 1.12 it was included in the lzip package. Previous
+	  entries in this file are taken from there.
+	* lziprecover.cc: Renamed to main.cc.
+	* New files merge.cc, repair.cc, split.cc, and range_dec.cc.
+	* main.cc: Added decompressor options (-c, -d, -k, -t) so that
+	  a external decompressor is not needed for recovery nor for
+	  "make check".
+	* Added new option '-D, --range-decompress' which extracts a
+	  range of bytes decompressing only the members containing the
+	  desired data.
+	* Added new option '-l, --list' which prints correct total file
+	  sizes even for multimember files.
+	* merge.cc repair.cc: Remove output file if recovery fails.
+	* Changed quote characters in messages as advised by GNU Standards.
+	* split.cc: Use Boyer-Moore algorithm to search for headers.
+	* configure: 'datadir' renamed to 'datarootdir'.
+
+2011-04-30  Antonio Diaz Diaz  <ant_diaz@teleline.es>
+
+	* Version 1.12 released.
+	* lziprecover.cc: If '-v' is not specified show errors only.
+	* unzcrash.cc: Use Arg_parser.
+	* unzcrash.cc: Added new option '-b, --bits'.
+	* unzcrash.cc: Added new option '-p, --position'.
+	* unzcrash.cc: Added new option '-s, --size'.
+
+2010-09-16  Antonio Diaz Diaz  <ant_diaz@teleline.es>
+
+	* Version 1.11 released.
+	* lziprecover.cc: Added new option '-m, --merge' which tries to
+	  produce a correct file merging the good parts of two or more
+	  damaged copies.
+	* lziprecover.cc: Added new option '-R, --repair' for repairing
+	  a 1-byte error in single-member files.
+	* decoder.cc (decode_member): Detect file errors earlier to
+	  improve efficiency of lziprecover's new repair capability.
+	  This change also prevents (harmless) access to uninitialized
+	  memory when decompressing a corrupt file.
+	* lziprecover.cc: Added new option '-f, --force'.
+	* lziprecover.cc: Added new option '-o, --output'.
+	* lziprecover.cc: Added new option '-s, --split' to select the
+	  until now only operation of splitting multimember files.
+	* lziprecover.cc: If no operation is specified, warn the user
+	  and do nothing.
+
+2009-06-22  Antonio Diaz Diaz  <ant_diaz@teleline.es>
+
+	* Version 1.6 released.
+	* Added man page for lziprecover.
+	* check.sh: Test lziprecover.
+
+2009-01-24  Antonio Diaz Diaz  <ant_diaz@teleline.es>
+
+	* Version 1.4 released.
+	* Added 'lziprecover', a member recoverer program.
+	* unzcrash.cc: Test all 1-byte errors.
+
+
+Copyright (C) 2009-2019 Antonio Diaz Diaz.
+
+This file is a collection of facts, and thus it is not copyrightable,
+but just in case, you have unlimited permission to copy, distribute and
+modify it.
