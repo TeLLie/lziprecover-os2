@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 class State
@@ -77,7 +77,7 @@ inline int get_len_state( const int len )
   { return std::min( len - min_match_len, len_states - 1 ); }
 
 inline int get_lit_state( const uint8_t prev_byte )
-  { return ( prev_byte >> ( 8 - literal_context_bits ) ); }
+  { return prev_byte >> ( 8 - literal_context_bits ); }
 
 
 enum { bit_model_move_bits = 5,
@@ -180,6 +180,15 @@ public:
       c = data[(c^buffer[i])&0xFF] ^ ( c >> 8 );
     crc = c;
     }
+
+  uint32_t compute_crc( const uint8_t * const buffer,
+                        const long long size ) const
+    {
+    uint32_t crc = 0xFFFFFFFFU;
+    for( long long i = 0; i < size; ++i )
+      crc = data[(crc^buffer[i])&0xFF] ^ ( crc >> 8 );
+    return crc ^ 0xFFFFFFFFU;
+    }
   };
 
 extern const CRC32 crc32;
@@ -204,7 +213,7 @@ struct Lzip_header
   {
   uint8_t data[6];			// 0-3 magic bytes
 					//   4 version
-					//   5 coded_dict_size
+					//   5 coded dictionary size
   enum { size = 6 };
 
   void set_magic() { std::memcpy( data, lzip_magic, 4 ); data[4] = 1; }
@@ -250,6 +259,10 @@ struct Lzip_header
       }
     return true;
     }
+
+  bool verify( const bool ignore_bad_ds ) const
+    { return verify_magic() && verify_version() &&
+             ( ignore_bad_ds || isvalid_ds( dictionary_size() ) ); }
   };
 
 
@@ -352,6 +365,8 @@ public:
     { return ( pos_ <= pos && end() > pos ); }
   bool overlaps( const Block & b ) const
     { return ( pos_ < b.end() && b.pos_ < end() ); }
+  bool overlaps( const long long pos, const long long size ) const
+    { return ( pos_ < pos + size && pos < end() ); }
 
   void shift( Block & b ) { ++size_; ++b.pos_; --b.size_; }
   Block split( const long long pos );
@@ -395,11 +410,12 @@ struct Error
   explicit Error( const char * const s ) : msg( s ) {}
   };
 
-
 inline unsigned long long positive_diff( const unsigned long long x,
                                          const unsigned long long y )
   { return ( ( x > y ) ? x - y : 0 ); }
 
+inline void set_retval( int & retval, const int new_val )
+  { if( retval < new_val ) retval = new_val; }
 
 const char * const bad_magic_msg = "Bad magic number (file not in lzip format).";
 const char * const bad_dict_msg = "Invalid dictionary size in member header.";
@@ -410,15 +426,17 @@ const char * const trailing_msg = "Trailing data not allowed.";
 int alone_to_lz( const int infd, const Pretty_print & pp );
 
 // defined in decoder.cc
-long readblock( const int fd, uint8_t * const buf, const long size );
-long writeblock( const int fd, const uint8_t * const buf, const long size );
+long long readblock( const int fd, uint8_t * const buf, const long long size );
+long long writeblock( const int fd, const uint8_t * const buf,
+                      const long long size );
 
 // defined in dump_remove.cc
 int dump_members( const std::vector< std::string > & filenames,
                   const std::string & default_output_filename,
                   const Member_list & member_list, const bool force,
                   bool ignore_errors, bool ignore_trailing,
-                  const bool loose_trailing, const bool strip );
+                  const bool loose_trailing, const bool strip,
+                  const bool to_stdout );
 int remove_members( const std::vector< std::string > & filenames,
                     const Member_list & member_list, bool ignore_errors,
                     bool ignore_trailing, const bool loose_trailing );
@@ -432,7 +450,12 @@ int list_files( const std::vector< std::string > & filenames,
 int seek_read( const int fd, uint8_t * const buf, const int size,
                const long long pos );
 
+// defined in lunzcrash.cc
+int lunzcrash( const std::string & input_filename );
+int md5sum_files( const std::vector< std::string > & filenames );
+
 // defined in main.cc
+extern const char * const program_name;
 extern std::string output_filename;	// global vars for output file
 extern int outfd;
 struct stat;
@@ -440,10 +463,10 @@ const char * bad_version( const unsigned version );
 const char * format_ds( const unsigned dictionary_size );
 void show_header( const unsigned dictionary_size );
 int open_instream( const char * const name, struct stat * const in_statsp,
-                   const bool no_ofile, const bool reg_only = false );
+                   const bool one_to_one, const bool reg_only = false );
 int open_truncable_stream( const char * const name,
                            struct stat * const in_statsp );
-bool open_outstream( const bool force, const bool from_stdin,
+bool open_outstream( const bool force, const bool protect,
                      const bool rw = false, const bool skipping = true );
 bool file_exists( const std::string & filename );
 void cleanup_and_fail( const int retval );
@@ -456,7 +479,7 @@ void show_file_error( const char * const filename, const char * const msg,
                       const int errcode = 0 );
 void internal_error( const char * const msg );
 void show_2file_error( const char * const msg1, const char * const name1,
-                  const char * const name2, const char * const msg2 );
+                       const char * const name2, const char * const msg2 );
 class Range_decoder;
 void show_dprogress( const unsigned long long cfile_size = 0,
                      const unsigned long long partial_size = 0,
@@ -470,9 +493,17 @@ int test_member_from_file( const int infd, const unsigned long long msize,
                            long long * const failure_posp = 0 );
 int merge_files( const std::vector< std::string > & filenames,
                  const std::string & default_output_filename,
-                 const bool force, const char terminator );
+                 const char terminator, const bool force );
+
+// defined in nrep_stats.cc
+int print_nrep_stats( const std::vector< std::string > & filenames,
+                      const int repeated_byte, const bool ignore_errors,
+                      const bool ignore_trailing, const bool loose_trailing );
 
 // defined in range_dec.cc
+const char * format_num( unsigned long long num,
+                         unsigned long long limit = -1ULL,
+                         const int set_prefix = 0 );
 bool safe_seek( const int fd, const long long pos );
 int range_decompress( const std::string & input_filename,
                       const std::string & default_output_filename,
@@ -481,15 +512,32 @@ int range_decompress( const std::string & input_filename,
                       const bool to_stdout );
 
 // defined in repair.cc
+long long seek_write( const int fd, const uint8_t * const buf,
+                      const long long size, const long long pos );
+uint8_t * read_member( const int infd, const long long mpos,
+                       const long long msize );
 int repair_file( const std::string & input_filename,
                  const std::string & default_output_filename,
-                 const bool force, const char terminator );
+                 const char terminator, const bool force );
 int debug_delay( const std::string & input_filename, Block range,
                  const char terminator );
 int debug_repair( const std::string & input_filename,
                   const Bad_byte & bad_byte, const char terminator );
 int debug_decompress( const std::string & input_filename,
                       const Bad_byte & bad_byte, const bool show_packets );
+
+// defined in reproduce.cc
+int reproduce_file( const std::string & input_filename,
+                    const std::string & default_output_filename,
+                    const char * const lzip_name,
+                    const char * const reference_filename,
+                    const int lzip_level, const char terminator,
+                    const bool force );
+int debug_reproduce_file( const std::string & input_filename,
+                          const char * const lzip_name,
+                          const char * const reference_filename,
+                          const Block & range, const int sector_size,
+                          const int lzip_level );
 
 // defined in split.cc
 int split_file( const std::string & input_filename,

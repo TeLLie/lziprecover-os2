@@ -1,25 +1,25 @@
-/*  Unzcrash - Tests robustness of decompressors to corrupted data.
-    Inspired by unzcrash.c from Julian Seward's bzip2.
-    Copyright (C) 2008-2019 Antonio Diaz Diaz.
+/* Unzcrash - Tests robustness of decompressors to corrupted data.
+   Inspired by unzcrash.c from Julian Seward's bzip2.
+   Copyright (C) 2008-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 /*
-    Exit status: 0 for a normal exit, 1 for environmental problems
-    (file not found, invalid flags, I/O errors, etc), 2 to indicate a
-    corrupt or invalid input file, 3 for an internal consistency error
-    (eg, bug) which caused unzcrash to panic.
+   Exit status: 0 for a normal exit, 1 for environmental problems
+   (file not found, invalid flags, I/O errors, etc), 2 to indicate a
+   corrupt or invalid input file, 3 for an internal consistency error
+   (eg, bug) which caused unzcrash to panic.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -52,7 +52,7 @@ void show_error( const char * const msg, const int errcode = 0,
 namespace {
 
 const char * const program_name = "unzcrash";
-const char * invocation_name = 0;
+const char * invocation_name = program_name;		// default value
 
 int verbosity = 0;
 
@@ -60,31 +60,28 @@ int verbosity = 0;
 void show_help()
   {
   std::printf( "Unzcrash tests the robustness of decompressors to corrupted data.\n"
-               "\nBy default, unzcrash reads the specified file and then repeatedly\n"
-               "decompresses it, increasing 256 times each byte of the compressed data,\n"
-               "so as to test all possible one-byte errors. Note that it may take years\n"
-               "or even centuries to test all possible one-byte errors in a large file\n"
-               "(tens of MB).\n"
-               "\nIf the '--block' option is given, unzcrash reads the specified file\n"
-               "and then repeatedly decompresses it, setting all bytes in each\n"
-               "successive block to the value given, so as to test all possible full\n"
-               "sector errors.\n"
-               "\nIf the '--truncate' option is given, unzcrash reads the specified\n"
-               "file and then repeatedly decompresses it, truncating the file to\n"
-               "increasing lengths, so as to test all possible truncation points.\n"
-               "\nNone of the three test modes described above should cause any invalid\n"
-               "memory accesses. If any of them does, please, report it as a bug to the\n"
-               "maintainers of the decompressor being tested.\n"
-               "\nIf the decompressor returns with zero status, unzcrash compares the\n"
-               "output of the decompressor for the original and corrupt files. If the\n"
-               "outputs differ, it means that the decompressor returned a false\n"
-               "negative; it failed to recognize the corruption and produced garbage\n"
-               "output. The only exception is when a multimember file is truncated just\n"
-               "after the last byte of a member, producing a shorter but valid\n"
-               "compressed file. Except in this latter case, please, report any false\n"
-               "negative as a bug.\n"
-               "\nIn order to compare the outputs, unzcrash needs a zcmp program able to\n"
-               "understand the format being tested. For example the one provided by zutils.\n"
+               "\nBy default, unzcrash reads the file specified and then repeatedly\n"
+               "decompresses it, increasing 256 times each byte of the compressed data, so\n"
+               "as to test all possible one-byte errors. Note that it may take years or even\n"
+               "centuries to test all possible one-byte errors in a large file (tens of MB).\n"
+               "\nIf the option '--block' is given, unzcrash reads the file specified and\n"
+               "then repeatedly decompresses it, setting all bytes in each successive block\n"
+               "to the value given, so as to test all possible full sector errors.\n"
+               "\nIf the option '--truncate' is given, unzcrash reads the file specified\n"
+               "and then repeatedly decompresses it, truncating the file to increasing\n"
+               "lengths, so as to test all possible truncation points.\n"
+               "\nNone of the three test modes described above should cause any invalid memory\n"
+               "accesses. If any of them does, please, report it as a bug to the maintainers\n"
+               "of the decompressor being tested.\n"
+               "\nIf the decompressor returns with zero status, unzcrash compares the output\n"
+               "of the decompressor for the original and corrupt files. If the outputs\n"
+               "differ, it means that the decompressor returned a false negative; it failed\n"
+               "to recognize the corruption and produced garbage output. The only exception\n"
+               "is when a multimember file is truncated just after the last byte of a\n"
+               "member, producing a shorter but valid compressed file. Except in this latter\n"
+               "case, please, report any false negative as a bug.\n"
+               "\nIn order to compare the outputs, unzcrash needs a 'zcmp' program able to\n"
+               "understand the format being tested. For example the zcmp provided by zutils.\n"
                "Use '--zcmp=false' to disable comparisons.\n"
                "\nUsage: %s [options] 'lzip -t' file.lz\n", invocation_name );
   std::printf( "\nOptions:\n"
@@ -188,7 +185,7 @@ uint8_t * read_file( const char * const name, long * const size )
 
   long buffer_size = 1 << 20;
   uint8_t * buffer = (uint8_t *)std::malloc( buffer_size );
-  if( !buffer ) { show_error( "Not enough memory." ); return 0; }
+  if( !buffer ) { show_error( mem_msg ); return 0; }
   long file_size = std::fread( buffer, 1, buffer_size, f );
   while( file_size >= buffer_size )
     {
@@ -201,8 +198,7 @@ uint8_t * read_file( const char * const name, long * const size )
       }
     buffer_size = ( buffer_size <= LONG_MAX / 2 ) ? 2 * buffer_size : LONG_MAX;
     uint8_t * const tmp = (uint8_t *)std::realloc( buffer, buffer_size );
-    if( !tmp )
-      { show_error( "Not enough memory." ); std::free( buffer ); return 0; }
+    if( !tmp ) { show_error( mem_msg ); std::free( buffer ); return 0; }
     buffer = tmp;
     file_size += std::fread( buffer + file_size, 1, buffer_size - file_size, f );
     }
@@ -304,7 +300,7 @@ int main( const int argc, const char * const argv[] )
   Mode program_mode = m_byte;
   uint8_t block_value = 0;
   bool verify = true;
-  invocation_name = argv[0];
+  if( argc > 0 ) invocation_name = argv[0];
 
   const Arg_parser::Option options[] =
     {
@@ -439,7 +435,7 @@ int main( const int argc, const char * const argv[] )
             {
             ++failed_comparisons;
             if( verbosity >= 0 )
-              std::fprintf( stderr, "byte %ld comparison failed\n", i );
+              std::fprintf( stderr, "length %ld comparison failed\n", i );
             }
           }
         }
@@ -447,7 +443,7 @@ int main( const int argc, const char * const argv[] )
   else if( program_mode == m_block )
     {
     uint8_t * block = (uint8_t *)std::malloc( block_size );
-    if( !block ) { show_error( "Not enough memory." ); return 1; }
+    if( !block ) { show_error( mem_msg ); return 1; }
     for( long i = pos; i < end; i += std::min( delta, end - i ) )
       {
       const long size = std::min( block_size, file_size - i );
@@ -497,7 +493,7 @@ int main( const int argc, const char * const argv[] )
           {
           ++decompressions;
           if( verbosity >= 2 )
-            std::fprintf( stderr, "0x%02X (0x%02X+0x%02X)  ",
+            std::fprintf( stderr, "0x%02X (0x%02X+0x%02X) ",
                           buffer[i], byte, j );
           FILE * f = popen( command, "w" );
           if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
@@ -506,8 +502,8 @@ int main( const int argc, const char * const argv[] )
             {
             ++successes;
             if( verbosity >= 0 )
-              { if( verbosity < 2 )
-                  std::fprintf( stderr, "0x%02X (0x%02X+0x%02X)  ",
+              { if( verbosity < 2 )	// else already printed above
+                  std::fprintf( stderr, "0x%02X (0x%02X+0x%02X) ",
                                 buffer[i], byte, j );
                 std::fputs( "passed the test\n", stderr ); }
             if( zcmp_command[0] )

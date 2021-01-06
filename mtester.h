@@ -1,33 +1,31 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 class Range_mtester
   {
   const uint8_t * const buffer;	// input buffer
-  const long buffer_size;
-  long pos;			// current pos in buffer
+  const long long buffer_size;
+  long long pos;			// current pos in buffer
   uint32_t code;
   uint32_t range;
   bool at_stream_end;
 
-  void operator=( const Range_mtester & );	// declared as private
-
 public:
-  Range_mtester( const uint8_t * const buf, const long buf_size )
+  Range_mtester( const uint8_t * const buf, const long long buf_size )
     :
     buffer( buf ),
     buffer_size( buf_size ),
@@ -38,7 +36,7 @@ public:
     {}
 
   bool finished() { return pos >= buffer_size; }
-  unsigned long member_position() const { return pos; }
+  unsigned long long member_position() const { return pos; }
 
   uint8_t get_byte()
     {
@@ -58,7 +56,7 @@ public:
   void load()
     {
     code = 0;
-    for( int i = 0; i < 5; ++i ) code = (code << 8) | get_byte();
+    for( int i = 0; i < 5; ++i ) code = ( code << 8 ) | get_byte();
     range = 0xFFFFFFFFU;
     code &= range;		// make sure that first byte is discarded
     }
@@ -66,7 +64,7 @@ public:
   void normalize()
     {
     if( range <= 0x00FFFFFFU )
-      { range <<= 8; code = (code << 8) | get_byte(); }
+      { range <<= 8; code = ( code << 8 ) | get_byte(); }
     }
 
   unsigned decode( const int num_bits )
@@ -79,7 +77,7 @@ public:
 //      symbol <<= 1;
 //      if( code >= range ) { code -= range; symbol |= 1; }
       const bool bit = ( code >= range );
-      symbol = ( symbol << 1 ) + bit;
+      symbol <<= 1; symbol += bit;
       code -= range & ( 0U - bit );
       }
     return symbol;
@@ -92,7 +90,8 @@ public:
     if( code < bound )
       {
       range = bound;
-      bm.probability += (bit_model_total - bm.probability) >> bit_model_move_bits;
+      bm.probability +=
+        ( bit_model_total - bm.probability ) >> bit_model_move_bits;
       return 0;
       }
     else
@@ -106,8 +105,7 @@ public:
 
   unsigned decode_tree3( Bit_model bm[] )
     {
-    unsigned symbol = 1;
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+    unsigned symbol = 2 | decode_bit( bm[1] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     return symbol & 7;
@@ -115,8 +113,7 @@ public:
 
   unsigned decode_tree6( Bit_model bm[] )
     {
-    unsigned symbol = 1;
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+    unsigned symbol = 2 | decode_bit( bm[1] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
@@ -140,7 +137,7 @@ public:
     for( int i = 0; i < num_bits; ++i )
       {
       const unsigned bit = decode_bit( bm[model] );
-      model = ( model << 1 ) + bit;
+      model <<= 1; model += bit;
       symbol |= ( bit << i );
       }
     return symbol;
@@ -149,12 +146,9 @@ public:
   unsigned decode_tree_reversed4( Bit_model bm[] )
     {
     unsigned symbol = decode_bit( bm[1] );
-    unsigned model = 2 + symbol;
-    unsigned bit = decode_bit( bm[model] );
-    model = ( model << 1 ) + bit; symbol |= ( bit << 1 );
-    bit = decode_bit( bm[model] );
-    model = ( model << 1 ) + bit; symbol |= ( bit << 2 );
-    symbol |= ( decode_bit( bm[model] ) << 3 );
+    symbol += decode_bit( bm[2+symbol] ) << 1;
+    symbol += decode_bit( bm[4+symbol] ) << 2;
+    symbol += decode_bit( bm[8+symbol] ) << 3;
     return symbol;
     }
 
@@ -165,9 +159,9 @@ public:
     while( symbol < 0x100 )
       {
       const unsigned match_bit = ( match_byte <<= 1 ) & 0x100;
-      const unsigned bit = decode_bit( bm1[match_bit+symbol] );
-      symbol = ( symbol << 1 ) | bit;
-      if( match_bit != bit << 8 )
+      const bool bit = decode_bit( bm1[symbol+match_bit] );
+      symbol <<= 1; symbol |= bit;
+      if( match_bit >> 8 != bit )
         {
         while( symbol < 0x100 )
           symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
@@ -187,6 +181,7 @@ public:
     }
   };
 
+class MD5SUM;		// forward declaration
 
 class LZ_mtester
   {
@@ -203,7 +198,13 @@ class LZ_mtester
   unsigned rep2;		// repeated distances
   unsigned rep3;
   State state;
-  unsigned max_rep0;		// maximum distance found
+  MD5SUM * const md5sum;
+  unsigned long long total_packets_;	// total number of packets in member
+  unsigned long long max_rep0_pos;	// file position of maximum distance
+  unsigned max_rep0;			// maximum distance found
+  std::vector< unsigned long long > max_packet_posv_;	// file pos of large packets
+  unsigned max_packet_size_;		// maximum packet size found
+  unsigned max_marker_size_;		// maximum marker size found
   bool pos_wrapped;
 
   Bit_model bm_literal[1<<literal_context_bits][0x300];
@@ -222,7 +223,7 @@ class LZ_mtester
 
   void print_block( const int len );
   void flush_data();
-  bool verify_trailer();
+  bool verify_trailer( FILE * const f = 0, unsigned long long byte_pos = 0 );
 
   uint8_t peek_prev() const
     { return buffer[((pos > 0) ? pos : dictionary_size)-1]; }
@@ -271,11 +272,21 @@ class LZ_mtester
       }
     }
 
-  void operator=( const LZ_mtester & );		// declared as private
+void set_max_packet( const unsigned new_size, const unsigned long long pos )
+  {
+  if( max_packet_size_ > new_size || new_size == 0 ) return;
+  if( max_packet_size_ < new_size )			// new max size
+    { max_packet_size_ = new_size; max_packet_posv_.clear(); }
+  max_packet_posv_.push_back( pos - new_size );		// pos of first byte
+  }
+
+void set_max_marker( const unsigned new_size )
+  { if( max_marker_size_ < new_size ) max_marker_size_ = new_size; }
 
 public:
-  LZ_mtester( const uint8_t * const ibuf, const long ibuf_size,
-              const unsigned dict_size, const int ofd = -1 )
+  LZ_mtester( const uint8_t * const ibuf, const long long ibuf_size,
+              const unsigned dict_size, const int ofd = -1,
+              MD5SUM * const md5sum_ = 0 )
     :
     partial_data_pos( 0 ),
     rdec( ibuf, ibuf_size ),
@@ -289,7 +300,12 @@ public:
     rep1( 0 ),
     rep2( 0 ),
     rep3( 0 ),
+    md5sum( md5sum_ ),
+    total_packets_( -1ULL ),		// don't count EOS marker
+    max_rep0_pos( 0 ),
     max_rep0( 0 ),
+    max_packet_size_( 0 ),
+    max_marker_size_( 0 ),
     pos_wrapped( false )
     // prev_byte of first byte; also for peek( 0 ) on corrupt file
     { buffer[dictionary_size-1] = 0; }
@@ -299,11 +315,28 @@ public:
   unsigned crc() const { return crc_ ^ 0xFFFFFFFFU; }
   unsigned long long data_position() const { return partial_data_pos + pos; }
   bool finished() { return rdec.finished(); }
-  unsigned long member_position() const { return rdec.member_position(); }
+  unsigned long long member_position() const { return rdec.member_position(); }
+  unsigned long long total_packets() const { return total_packets_; }
+  unsigned long long max_distance_pos() const { return max_rep0_pos; }
   unsigned max_distance() const { return max_rep0 + 1; }
+  const std::vector< unsigned long long > & max_packet_posv() const
+    { return max_packet_posv_; }
+  unsigned max_packet_size() const { return max_packet_size_; }
+  unsigned max_marker_size() const { return max_marker_size_; }
+
+  const uint8_t * get_buffers( const uint8_t ** prev_bufferp,
+                               int * sizep, int * prev_sizep ) const
+    { *sizep = ( pos_wrapped && pos == 0 ) ? dictionary_size : pos;
+      *prev_sizep = ( pos_wrapped && pos > 0 ) ? dictionary_size - pos : 0;
+      *prev_bufferp = buffer + pos; return buffer; }
 
   void duplicate_buffer();
-  int test_member( const unsigned long pos_limit = LONG_MAX );	// sets max_rep0
+  // these two functions set max_rep0
+  int test_member( const unsigned long long mpos_limit = LLONG_MAX,
+                   const unsigned long long dpos_limit = LLONG_MAX,
+                   FILE * const f = 0, const unsigned long long byte_pos = 0 );
+  /* this function also sets max_rep0_pos, total_packets_, max_packet_size_,
+                             max_packet_posv_, and max_marker_size_ */
   int debug_decode_member( const long long dpos, const long long mpos,
-                           const bool show_packets );	// sets max_rep0
+                           const bool show_packets );
   };

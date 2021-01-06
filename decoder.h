@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 class Range_decoder
@@ -49,7 +49,9 @@ public:
 
   unsigned get_code() const { return code; }
   bool finished() { return pos >= stream_pos && !read_block(); }
-  unsigned long long member_position() const { return partial_member_pos + pos; }
+
+  unsigned long long member_position() const
+    { return partial_member_pos + pos; }
 
   void reset_member_position()
     { partial_member_pos = 0; partial_member_pos -= pos; }
@@ -74,10 +76,40 @@ public:
     return sz;
     }
 
+  /* if ignore_errors, stop reading before the first wrong byte, so that
+     unreading the header is not required to sync to next member */
+  int read_header_carefully( Lzip_header & header, const bool ignore_errors )
+    {
+    int sz = 0;
+    while( sz < Lzip_header::size && !finished() )
+      {
+      header.data[sz] = buffer[pos];
+      if( ignore_errors &&
+          ( ( sz < 4 && header.data[sz] != lzip_magic[sz] ) ||
+            ( sz == 4 && !header.verify_version() ) ||
+            ( sz == 5 && !isvalid_ds( header.dictionary_size() ) ) ) ) break;
+      ++pos; ++sz;
+      }
+    return sz;
+    }
+
+  bool find_header( Lzip_header & header )
+    {
+    while( !finished() )
+      {
+      if( buffer[pos] != lzip_magic[0] ) { ++pos; continue; }
+      reset_member_position();
+      Lzip_header h;
+      if( read_header_carefully( h, true ) == Lzip_header::size )
+        { header = h; return true; }
+      }
+    return false;
+    }
+
   void load()
     {
     code = 0;
-    for( int i = 0; i < 5; ++i ) code = (code << 8) | get_byte();
+    for( int i = 0; i < 5; ++i ) code = ( code << 8 ) | get_byte();
     range = 0xFFFFFFFFU;
     code &= range;		// make sure that first byte is discarded
     }
@@ -85,7 +117,7 @@ public:
   void normalize()
     {
     if( range <= 0x00FFFFFFU )
-      { range <<= 8; code = (code << 8) | get_byte(); }
+      { range <<= 8; code = ( code << 8 ) | get_byte(); }
     }
 
   unsigned decode( const int num_bits )
@@ -98,7 +130,7 @@ public:
 //      symbol <<= 1;
 //      if( code >= range ) { code -= range; symbol |= 1; }
       const bool bit = ( code >= range );
-      symbol = ( symbol << 1 ) + bit;
+      symbol <<= 1; symbol += bit;
       code -= range & ( 0U - bit );
       }
     return symbol;
@@ -111,7 +143,8 @@ public:
     if( code < bound )
       {
       range = bound;
-      bm.probability += (bit_model_total - bm.probability) >> bit_model_move_bits;
+      bm.probability +=
+        ( bit_model_total - bm.probability ) >> bit_model_move_bits;
       return 0;
       }
     else
@@ -125,8 +158,7 @@ public:
 
   unsigned decode_tree3( Bit_model bm[] )
     {
-    unsigned symbol = 1;
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+    unsigned symbol = 2 | decode_bit( bm[1] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     return symbol & 7;
@@ -134,8 +166,7 @@ public:
 
   unsigned decode_tree6( Bit_model bm[] )
     {
-    unsigned symbol = 1;
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+    unsigned symbol = 2 | decode_bit( bm[1] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
     symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
@@ -159,7 +190,7 @@ public:
     for( int i = 0; i < num_bits; ++i )
       {
       const unsigned bit = decode_bit( bm[model] );
-      model = ( model << 1 ) + bit;
+      model <<= 1; model += bit;
       symbol |= ( bit << i );
       }
     return symbol;
@@ -168,12 +199,9 @@ public:
   unsigned decode_tree_reversed4( Bit_model bm[] )
     {
     unsigned symbol = decode_bit( bm[1] );
-    unsigned model = 2 + symbol;
-    unsigned bit = decode_bit( bm[model] );
-    model = ( model << 1 ) + bit; symbol |= ( bit << 1 );
-    bit = decode_bit( bm[model] );
-    model = ( model << 1 ) + bit; symbol |= ( bit << 2 );
-    symbol |= ( decode_bit( bm[model] ) << 3 );
+    symbol += decode_bit( bm[2+symbol] ) << 1;
+    symbol += decode_bit( bm[4+symbol] ) << 2;
+    symbol += decode_bit( bm[8+symbol] ) << 3;
     return symbol;
     }
 
@@ -184,9 +212,9 @@ public:
     while( symbol < 0x100 )
       {
       const unsigned match_bit = ( match_byte <<= 1 ) & 0x100;
-      const unsigned bit = decode_bit( bm1[match_bit+symbol] );
-      symbol = ( symbol << 1 ) | bit;
-      if( match_bit != bit << 8 )
+      const bool bit = decode_bit( bm1[symbol+match_bit] );
+      symbol <<= 1; symbol |= bit;
+      if( match_bit >> 8 != bit )
         {
         while( symbol < 0x100 )
           symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );

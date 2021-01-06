@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -43,24 +43,9 @@ void print_pending_newline( const char terminator )
     pending_newline = false; }
 
 
-uint8_t * read_member( const int infd, const long long mpos,
-                       const long long msize )
-  {
-  if( msize <= 0 || msize > LONG_MAX )
-    { show_error( "Member is larger than LONG_MAX." ); return 0; }
-  if( !safe_seek( infd, mpos ) ) return 0;
-  uint8_t * const buffer = new uint8_t[msize];
-
-  if( readblock( infd, buffer, msize ) != msize )
-    { show_error( "Error reading input file", errno );
-      delete[] buffer; return 0; }
-  return buffer;
-  }
-
-
 bool gross_damage( const long long msize, const uint8_t * const mbuffer )
   {
-  enum { maxlen = 6 };		// max number of consecutive identical bytes
+  enum { maxlen = 7 };		// max number of consecutive identical bytes
   long i = Lzip_header::size;
   const long end = msize - Lzip_trailer::size - maxlen;
   while( i < end )
@@ -73,19 +58,10 @@ bool gross_damage( const long long msize, const uint8_t * const mbuffer )
   }
 
 
-int seek_write( const int fd, const uint8_t * const buf, const int size,
-                const long long pos )
-  {
-  if( lseek( fd, pos, SEEK_SET ) == pos )
-    return writeblock( fd, buf, size );
-  return 0;
-  }
-
-
 // Return value: 0 = no change, 5 = repaired pos
 int repair_dictionary_size( const long long msize, uint8_t * const mbuffer )
   {
-  enum { dictionary_size_9 = 1 << 25 };		// dictionary size of option -9
+  const unsigned long long dictionary_size_9 = 1 << 25;	// dict size of opt -9
   Lzip_header & header = *(Lzip_header *)mbuffer;
   unsigned dictionary_size = header.dictionary_size();
   const Lzip_trailer & trailer =
@@ -96,8 +72,7 @@ int repair_dictionary_size( const long long msize, uint8_t * const mbuffer )
 
   if( !valid_ds || dictionary_size < dictionary_size_9 )
     {
-    dictionary_size =
-      std::min( data_size, (unsigned long long)dictionary_size_9 );
+    dictionary_size = std::min( data_size, dictionary_size_9 );
     if( dictionary_size < min_dictionary_size )
       dictionary_size = min_dictionary_size;
     LZ_mtester mtester( mbuffer, msize, dictionary_size );
@@ -176,12 +151,37 @@ long repair_member( const long long mpos, const long long msize,
 } // end namespace
 
 
+long long seek_write( const int fd, const uint8_t * const buf,
+                      const long long size, const long long pos )
+  {
+  if( lseek( fd, pos, SEEK_SET ) == pos )
+    return writeblock( fd, buf, size );
+  return 0;
+  }
+
+
+uint8_t * read_member( const int infd, const long long mpos,
+                       const long long msize )
+  {
+  if( msize <= 0 || msize > LONG_MAX )
+    { show_error( "Member is larger than LONG_MAX." ); return 0; }
+  if( !safe_seek( infd, mpos ) ) return 0;
+  uint8_t * const buffer = new uint8_t[msize];
+
+  if( readblock( infd, buffer, msize ) != msize )
+    { show_error( "Error reading input file", errno );
+      delete[] buffer; return 0; }
+  return buffer;
+  }
+
+
 int repair_file( const std::string & input_filename,
                  const std::string & default_output_filename,
-                 const bool force, const char terminator )
+                 const char terminator, const bool force )
   {
   struct stat in_stats;
-  const int infd = open_instream( input_filename.c_str(), &in_stats, true, true );
+  const int infd =
+    open_instream( input_filename.c_str(), &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, true, true, true );
@@ -221,20 +221,21 @@ int repair_file( const std::string & input_filename,
       pos = repair_dictionary_size( msize, mbuffer );
       if( pos == 0 )
         pos = repair_member( mpos, msize, mbuffer, Lzip_header::size + 1,
-                             Lzip_header::size + 5, dictionary_size, terminator );
+                             Lzip_header::size + 6, dictionary_size, terminator );
       if( pos == 0 )
-        pos = repair_member( mpos, msize, mbuffer, Lzip_header::size + 6,
+        pos = repair_member( mpos, msize, mbuffer, Lzip_header::size + 7,
                              failure_pos, dictionary_size, terminator );
       print_pending_newline( terminator );
       }
-    if( pos < 0 ) cleanup_and_fail( 1 );
+    if( pos < 0 )
+      { show_error( "Can't prepare master." ); cleanup_and_fail( 1 ); }
     if( pos > 0 )
       {
       if( outfd < 0 )		// first damaged member repaired
         {
         if( !safe_seek( infd, 0 ) ) return 1;
         set_signal_handler();
-        if( !open_outstream( true, false ) ) { close( infd ); return 1; }
+        if( !open_outstream( true, true ) ) return 1;
         if( !copy_file( infd, outfd ) )		// copy whole file
           cleanup_and_fail( 1 );
         }
@@ -267,7 +268,8 @@ int debug_delay( const std::string & input_filename, Block range,
                  const char terminator )
   {
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename.c_str(), &in_stats, true, true );
+  const int infd =
+    open_instream( input_filename.c_str(), &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, true, true );
@@ -346,7 +348,8 @@ int debug_repair( const std::string & input_filename,
                   const Bad_byte & bad_byte, const char terminator )
   {
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename.c_str(), &in_stats, true, true );
+  const int infd =
+    open_instream( input_filename.c_str(), &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, true, true );
@@ -368,9 +371,9 @@ int debug_repair( const std::string & input_filename,
   if( test_member_from_file( infd, msize, &failure_pos ) != 0 )
     {
     if( verbosity >= 0 )
-      std::printf( "Member %ld of %ld already damaged  (failure pos = %llu)\n",
-                   idx + 1, lzip_index.members(), mpos + failure_pos );
-    return 1;
+      std::fprintf( stderr, "Member %ld of %ld already damaged  (failure pos = %llu)\n",
+                    idx + 1, lzip_index.members(), mpos + failure_pos );
+    return 2;
     }
   }
   uint8_t * const mbuffer = read_member( infd, mpos, msize );
@@ -410,26 +413,35 @@ int debug_repair( const std::string & input_filename,
   long pos = repair_dictionary_size( msize, mbuffer );
   if( pos == 0 )
     pos = repair_member( mpos, msize, mbuffer, Lzip_header::size + 1,
-                         Lzip_header::size + 5, dictionary_size, terminator );
+                         Lzip_header::size + 6, dictionary_size, terminator );
   if( pos == 0 )
-    pos = repair_member( mpos, msize, mbuffer, Lzip_header::size + 6,
+    pos = repair_member( mpos, msize, mbuffer, Lzip_header::size + 7,
                          failure_pos, dictionary_size, terminator );
   print_pending_newline( terminator );
   delete[] mbuffer;
-  if( pos < 0 )
-    { show_error( "Can't prepare master." ); return 1; }
+  if( pos < 0 ) { show_error( "Can't prepare master." ); return 1; }
   if( pos == 0 ) internal_error( "can't repair input file." );
-  if( verbosity >= 1 )
-    std::fputs( "Member repaired successfully.\n", stdout );
+  if( verbosity >= 1 ) std::fputs( "Member repaired successfully.\n", stdout );
   return 0;
   }
 
 
+/* If show_packets is true, print to stdout descriptions of the decoded LZMA
+   packets. Print also some global values; total number of packets in
+   member, max distance (rep0) and its file position, max LZMA packet size
+   in each member and the file position of these packets.
+   (Packet sizes are a fractionary number of bytes. The packet and marker
+   sizes shown by option -X are the number of extra bytes required to decode
+   the packet, not counting the data present in the range decoder before and
+   after the decoding. The max marker size of a 'Sync Flush marker' does not
+   include the 5 bytes read by rdec.load).
+*/
 int debug_decompress( const std::string & input_filename,
                       const Bad_byte & bad_byte, const bool show_packets )
   {
   struct stat in_stats;
-  const int infd = open_instream( input_filename.c_str(), &in_stats, true, true );
+  const int infd =
+    open_instream( input_filename.c_str(), &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, true, true );
@@ -465,6 +477,22 @@ int debug_decompress( const std::string & input_filename,
     LZ_mtester mtester( mbuffer, msize, dictionary_size, outfd );
     const int result = mtester.debug_decode_member( dpos, mpos, show_packets );
     delete[] mbuffer;
+    if( show_packets )
+      {
+      const std::vector< unsigned long long > & mppv = mtester.max_packet_posv();
+      const unsigned mpackets = mppv.size();
+      std::printf( "Total packets in member   = %llu\n"
+                   "Max distance in any match = %u at file position %llu\n"
+                   "Max marker size found = %u\n"
+                   "Max packet size found = %u (%u packets)%s",
+                    mtester.total_packets(), mtester.max_distance(),
+                    mtester.max_distance_pos(), mtester.max_marker_size(),
+                    mtester.max_packet_size(), mpackets,
+                    mpackets ? " at file positions" : "" );
+      for( unsigned i = 0; i < mpackets; ++i )
+        std::printf( " %llu", mppv[i] );
+      std::fputc( '\n', stdout );
+      }
     if( result != 0 )
       {
       if( verbosity >= 0 && result <= 2 && show_packets )

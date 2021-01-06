@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #include "lzip.h"
+#include "md5.h"
 #include "mtester.h"
 
 
@@ -80,6 +81,7 @@ void LZ_mtester::flush_data()
     {
     const int size = pos - stream_pos;
     crc32.update_buf( crc_, buffer + stream_pos, size );
+    if( md5sum ) md5sum->md5_update( buffer + stream_pos, size );
     if( outfd >= 0 && writeblock( outfd, buffer + stream_pos, size ) != size )
       throw Error( "Write error" );
     if( pos >= dictionary_size )
@@ -89,27 +91,68 @@ void LZ_mtester::flush_data()
   }
 
 
-bool LZ_mtester::verify_trailer()
+bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
   {
   const Lzip_trailer * const trailer = rdec.get_trailer();
+  if( !trailer )
+    {
+    if( verbosity >= 0 && f )
+      { if( byte_pos )
+          { std::fprintf( f, "byte %llu\n", byte_pos ); byte_pos = 0; }
+        std::fputs( "Can't get trailer.\n", f ); }
+    return false;
+    }
+  const unsigned long long data_size = data_position();
+  const unsigned long long member_size = member_position();
+  bool error = false;
 
-  return ( trailer &&
-           trailer->data_crc() == crc() &&
-           trailer->data_size() == data_position() &&
-           trailer->member_size() == member_position() );
+  const unsigned td_crc = trailer->data_crc();
+  if( td_crc != crc() )
+    {
+    error = true;
+    if( verbosity >= 0 && f )
+      { if( byte_pos )
+          { std::fprintf( f, "byte %llu\n", byte_pos ); byte_pos = 0; }
+        std::fprintf( f, "CRC mismatch; stored %08X, computed %08X\n",
+                      td_crc, crc() ); }
+    }
+  const unsigned long long td_size = trailer->data_size();
+  if( td_size != data_size )
+    {
+    error = true;
+    if( verbosity >= 0 && f )
+      { if( byte_pos )
+          { std::fprintf( f, "byte %llu\n", byte_pos ); byte_pos = 0; }
+        std::fprintf( f, "Data size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
+                      td_size, td_size, data_size, data_size ); }
+    }
+  const unsigned long long tm_size = trailer->member_size();
+  if( tm_size != member_size )
+    {
+    error = true;
+    if( verbosity >= 0 && f )
+      { if( byte_pos )
+          { std::fprintf( f, "byte %llu\n", byte_pos ); byte_pos = 0; }
+        std::fprintf( f, "Member size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
+                      tm_size, tm_size, member_size, member_size ); }
+    }
+  return !error;
   }
 
 
 /* Return value: 0 = OK, 1 = decoder error, 2 = unexpected EOF,
                  3 = trailer error, 4 = unknown marker found,
                  -1 = pos_limit reached. */
-int LZ_mtester::test_member( const unsigned long pos_limit )
+int LZ_mtester::test_member( const unsigned long long mpos_limit,
+                             const unsigned long long dpos_limit,
+                             FILE * const f, const unsigned long long byte_pos )
   {
-  if( pos_limit < Lzip_header::size + 5 ) return -1;
+  if( mpos_limit < Lzip_header::size + 5 ) return -1;
   if( member_position() == Lzip_header::size ) rdec.load();
   while( !rdec.finished() )
     {
-    if( member_position() >= pos_limit ) { flush_data(); return -1; }
+    if( member_position() >= mpos_limit || data_position() >= dpos_limit )
+      { flush_data(); return -1; }
     const int pos_state = data_position() & pos_state_mask;
     if( rdec.decode_bit( bm_match[state()][pos_state] ) == 0 )	// 1st bit
       {
@@ -172,14 +215,19 @@ int LZ_mtester::test_member( const unsigned long pos_limit )
             flush_data();
             if( len == min_match_len )		// End Of Stream marker
               {
-              if( verify_trailer() ) return 0; else return 3;
+              if( verify_trailer( f, byte_pos ) ) return 0; else return 3;
+              }
+            if( verbosity >= 0 && f )
+              {
+              if( byte_pos ) std::fprintf( f, "byte %llu\n", byte_pos );
+              std::fprintf( f, "Unsupported marker code '%d'\n", len );
               }
             return 4;
             }
-          if( distance > max_rep0 ) max_rep0 = distance;
           }
         }
       rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = distance;
+      if( rep0 > max_rep0 ) max_rep0 = rep0;
       state.set_match();
       if( rep0 >= dictionary_size || ( rep0 >= pos && !pos_wrapped ) )
         { flush_data(); return 1; }
@@ -197,10 +245,15 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
                                      const bool show_packets )
   {
   rdec.load();
+  unsigned old_tmpos = member_position();	// truncated member_position
   while( !rdec.finished() )
     {
     const unsigned long long dp = data_position() + dpos;
     const unsigned long long mp = member_position() + mpos - 4;
+    const unsigned tmpos = member_position();
+    set_max_packet( tmpos - old_tmpos, mp );
+    old_tmpos = tmpos;
+    ++total_packets_;
     const int pos_state = data_position() & pos_state_mask;
     if( rdec.decode_bit( bm_match[state()][pos_state] ) == 0 )	// 1st bit
       {
@@ -285,6 +338,9 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
             {
             rdec.normalize();
             flush_data();
+            const unsigned tmpos = member_position();
+            set_max_marker( tmpos - old_tmpos );
+            old_tmpos = tmpos;
             if( show_packets )
               std::printf( "%6llu %6llu  marker code '%d'\n", mp, dp, len );
             if( len == min_match_len )		// End Of Stream marker
@@ -292,8 +348,7 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
               if( show_packets )
                 std::printf( "%6llu %6llu  member trailer\n",
                              mpos + member_position(), dpos + data_position() );
-              if( verify_trailer() ) return 0;
-              if( show_packets ) std::fputs( "trailer error\n", stdout );
+              if( verify_trailer( show_packets ? stdout : 0 ) ) return 0;
               return 3;
               }
             if( len == min_match_len + 1 )	// Sync Flush marker
@@ -302,10 +357,10 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
               }
             return 4;
             }
-          if( distance > max_rep0 ) max_rep0 = distance;
           }
         }
       rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = distance;
+      if( rep0 > max_rep0 ) { max_rep0 = rep0; max_rep0_pos = mp; }
       state.set_match();
       if( show_packets )
         std::printf( "%6llu %6llu  match %6u,%3d (%6lld)",

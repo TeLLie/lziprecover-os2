@@ -1,52 +1,73 @@
-Changes in version 1.21:
+Changes in version 1.22:
 
-The options '--dump', '--remove' and '--strip' have been added, mainly as
-support for the tarlz archive format: http://www.nongnu.org/lzip/tarlz.html
-These options replace '--dump-tdata', '--remove-tdata' and '--strip-tdata',
-which are now aliases and will be removed in version 1.22.
+The option '-e, --reproduce', which can recover a missing (zeroed) sector in
+a lzip file, has been added. For it to work, two things are required:
+  - The same version of the lzip tool that created the file.
+  - A reference file containing the uncompressed data corresponding to the
+    missing compressed data of the zeroed sector, plus some context data
+    before and after them.
+Thanks to Nissanka Gooneratne for his help in testing the reproduce mode.
 
-  '--dump=[<member_list>][:damaged][:tdata]' dumps the members listed, the
-  damaged members (if any), or the trailing data (if any) of one or more
-  regular multimember files to standard output.
+The options '--lzip-level', '--lzip-name', and '--reference-file', auxiliary
+to '-e, --reproduce', have been added.
 
-  '--remove=[<member_list>][:damaged][:tdata]' removes the members listed,
-  the damaged members (if any), or the trailing data (if any) from regular
-  multimember files in place.
+Option aliases '--dump-tdata', '--remove-tdata', and '--strip-tdata' have
+been removed.
 
-  '--strip=[<member_list>][:damaged][:tdata]' copies one or more regular
-  multimember files to standard output, stripping the members listed, the
-  damaged members (if any), or the trailing data (if any) from each file.
+When decompressing or testing, lziprecover now reports an error if a file
+name is empty (lziprecover -t "").
 
-Detection of forbidden combinations of characters in trailing data has been
-improved.
+Option '-o, --output' now behaves like '-c, --stdout', but sending the
+output unconditionally to a file instead of to standard output. See the new
+description of '-o' in the manual. This change is backwards compatible only
+when decompressing from standard input alone. Therefore commands like:
+  lziprecover -d -o foo - bar.lz < foo.lz
+must now be split into:
+  lziprecover -d -o foo - < foo.lz
+  lziprecover -d bar.lz
+or rewritten as:
+  lziprecover -d - bar.lz < foo.lz > foo
 
-'--split' can now detect trailing data and gaps between members, and save
-each gap in its own file. Trailing data (if any) are saved alone in the last
-file. (Gaps may contain garbage or may be members with corrupt headers or
-trailers).
+When using '-c' or '-o', lziprecover now checks whether the output is a
+terminal only once.
 
-'--ignore-errors' now makes '--list' show gaps between members, ignoring
-format errors.
+Lziprecover now does not even open the output file if the input file is a
+terminal.
 
-'--ignore-errors' now makes '--range-decompress' ignore a truncated last
-member.
+'--ignore-errors' now makes '--decompress' and '--test' ignore data errors
+and continue decompressing the remaining members in the file, keeping input
+files unchanged.
 
-Errors are now also checked when closing the input file in decompression
-mode.
+'--ignore-errors --range-decompress' now decompresses a truncated last
+member. It also returns 0 if only ignored errors (format errors or data
+errors) are found.
 
-Some diagnostic messages have been improved.
+'--ignore-errors' now considers that any fragment of file starting with a
+valid header and large enough to be a member is a (corrupt) member, not a
+gap, even if it lacks a valid trailer.
 
-'\n' is now printed instead of '\r' when showing progress of merge or repair
-if stdout is not a terminal.
+The words 'decompressed' and 'compressed' have been replaced with the
+shorter 'out' and 'in' in the verbose output when decompressing or testing.
 
-Lziprecover now compiles on DOS with DJGPP. (Patch from Robert Riebisch).
+Several compiler warnings have been fixed. (Reported by Nissanka Gooneratne).
 
-The new chapter 'Tarlz', explaining the ways in which lziprecover can
-recover and process multimember tar.lz archives, has been added to the
-manual.
+Option '--list' now reports corruption or truncation of the last header in a
+multimenber file specifically instead of showing the generic message "Last
+member in input file is truncated or corrupt."
 
-The configure script now accepts appending options to CXXFLAGS using the
-syntax 'CXXFLAGS+=OPTIONS'.
+The debug options '-E, --debug-reproduce', '-M, --md5sum', and
+'-U, --unzcrash' have been added.
 
-It has been documented in INSTALL the use of
-CXXFLAGS+='-D __USE_MINGW_ANSI_STDIO' when compiling on MinGW.
+The commands needed to extract files from a tar.lz archive have been
+documented in the manual, in the output of '--help', and in the man page.
+
+The new chapter 'Reproducing one sector' has been added to the manual.
+
+The new sections 'Merging with a backup' and 'Reproducing a mailbox' have
+been added to the manual.
+
+The debug options for experts have been documented in the manual.
+
+Lzip 1.16 (or clzip 1.6) or newer is required to run the tests.
+
+9 new test files have been added to the testsuite.

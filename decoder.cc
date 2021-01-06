@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -37,13 +37,13 @@ const CRC32 crc32;
 /* Returns the number of bytes really read.
    If (returned value < size) and (errno == 0), means EOF was reached.
 */
-long readblock( const int fd, uint8_t * const buf, const long size )
+long long readblock( const int fd, uint8_t * const buf, const long long size )
   {
-  long sz = 0;
+  long long sz = 0;
   errno = 0;
   while( sz < size )
     {
-    const int n = read( fd, buf + sz, std::min( 1L << 20, size - sz ) );
+    const int n = read( fd, buf + sz, std::min( 1LL << 20, size - sz ) );
     if( n > 0 ) sz += n;
     else if( n == 0 ) break;				// EOF
     else if( errno != EINTR ) break;
@@ -56,13 +56,14 @@ long readblock( const int fd, uint8_t * const buf, const long size )
 /* Returns the number of bytes really written.
    If (returned value < size), it is always an error.
 */
-long writeblock( const int fd, const uint8_t * const buf, const long size )
+long long writeblock( const int fd, const uint8_t * const buf,
+                      const long long size )
   {
-  long sz = 0;
+  long long sz = 0;
   errno = 0;
   while( sz < size )
     {
-    const int n = write( fd, buf + sz, std::min( 1L << 20, size - sz ) );
+    const int n = write( fd, buf + sz, std::min( 1LL << 20, size - sz ) );
     if( n > 0 ) sz += n;
     else if( n < 0 && errno != EINTR ) break;
     errno = 0;
@@ -166,16 +167,15 @@ bool LZ_decoder::verify_trailer( const Pretty_print & pp ) const
     {
     if( verbosity >= 4 ) show_header( dictionary_size );
     if( data_size == 0 || member_size == 0 )
-      std::fputs( "no data compressed.  ", stderr );
+      std::fputs( "no data compressed. ", stderr );
     else
-      std::fprintf( stderr, "%6.3f:1, %5.2f%% ratio, %5.2f%% saved.  ",
+      std::fprintf( stderr, "%6.3f:1, %5.2f%% ratio, %5.2f%% saved. ",
                     (double)data_size / member_size,
                     ( 100.0 * member_size ) / data_size,
                     100.0 - ( ( 100.0 * member_size ) / data_size ) );
     if( verbosity >= 4 ) std::fprintf( stderr, "CRC %08X, ", td_crc );
     if( verbosity >= 3 )
-      std::fprintf( stderr, "decompressed %9llu, compressed %8llu.  ",
-                    data_size, member_size );
+      std::fprintf( stderr, "%9llu out, %8llu in. ", data_size, member_size );
     }
   if( rdec.get_code() != 0 && verbosity >= 1 )
     {			// corruption in the last 4 bytes of the EOS marker

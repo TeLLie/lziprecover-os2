@@ -1,22 +1,23 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #define _FILE_OFFSET_BITS 64
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -37,14 +38,15 @@ int dump_members( const std::vector< std::string > & filenames,
                   const std::string & default_output_filename,
                   const Member_list & member_list, const bool force,
                   bool ignore_errors, bool ignore_trailing,
-                  const bool loose_trailing, const bool strip )
+                  const bool loose_trailing, const bool strip,
+                  const bool to_stdout )
   {
-  if( default_output_filename.empty() ) outfd = STDOUT_FILENO;
+  if( to_stdout || default_output_filename.empty() ) outfd = STDOUT_FILENO;
   else
     {
     output_filename = default_output_filename;
     set_signal_handler();
-    if( !open_outstream( force, true, false, false ) ) return 1;
+    if( !open_outstream( force, false, false, false ) ) return 1;
     }
   unsigned long long copied_size = 0, stripped_size = 0;
   unsigned long long copied_tsize = 0, stripped_tsize = 0;
@@ -61,15 +63,15 @@ int dump_members( const std::vector< std::string > & filenames,
       from_stdin ? "(stdin)" : filenames[i].c_str();
     struct stat in_stats;				// not used
     const int infd = from_stdin ? STDIN_FILENO :
-      open_instream( input_filename, &in_stats, true, true );
-    if( infd < 0 ) { if( retval < 1 ) retval = 1; continue; }
+      open_instream( input_filename, &in_stats, false, true );
+    if( infd < 0 ) { set_retval( retval, 1 ); continue; }
 
     const Lzip_index lzip_index( infd, ignore_trailing, loose_trailing,
                                  ignore_errors, ignore_errors );
     if( lzip_index.retval() != 0 )
       {
       show_file_error( input_filename, lzip_index.error().c_str() );
-      if( retval < lzip_index.retval() ) retval = lzip_index.retval();
+      set_retval( retval, lzip_index.retval() );
       close( infd );
       continue;
       }
@@ -131,7 +133,7 @@ int dump_members( const std::vector< std::string > & filenames,
     else if( trailing_size > 0 ) { stripped_tsize += trailing_size; ++tfiles; }
     close( infd );
     }
-  if( close_outstream( 0 ) != 0 && retval < 1 ) retval = 1;
+  if( close_outstream( 0 ) != 0 ) set_retval( retval, 1 );
   if( verbosity >= 1 )
     {
     if( !strip )
@@ -173,20 +175,20 @@ int remove_members( const std::vector< std::string > & filenames,
     {
     const char * const filename = filenames[i].c_str();
     struct stat in_stats, dummy_stats;
-    const int infd = open_instream( filename, &in_stats, true, true );
-    if( infd < 0 ) { if( retval < 1 ) retval = 1; continue; }
+    const int infd = open_instream( filename, &in_stats, false, true );
+    if( infd < 0 ) { set_retval( retval, 1 ); continue; }
 
     const Lzip_index lzip_index( infd, ignore_trailing, loose_trailing,
                                  ignore_errors, ignore_errors );
     if( lzip_index.retval() != 0 )
       {
       show_file_error( filename, lzip_index.error().c_str() );
-      if( retval < lzip_index.retval() ) retval = lzip_index.retval();
+      set_retval( retval, lzip_index.retval() );
       close( infd );
       continue;
       }
     const int fd = open_truncable_stream( filename, &dummy_stats );
-    if( fd < 0 ) { close( infd ); if( retval < 1 ) retval = 1; continue; }
+    if( fd < 0 ) { close( infd ); set_retval( retval, 1 ); continue; }
 
     if( !safe_seek( infd, 0 ) ) return 1;
     const long blocks = lzip_index.blocks( false );	// not counting tdata
@@ -206,7 +208,7 @@ int remove_members( const std::vector< std::string > & filenames,
               ( !safe_seek( infd, prev_end ) ||
                 !safe_seek( fd, stream_pos ) ||
                 !copy_file( infd, fd, mb.pos() - prev_end ) ) )
-            { error = true; if( retval < 1 ) retval = 1; break; }
+            { error = true; set_retval( retval, 1 ); break; }
           stream_pos += mb.pos() - prev_end;
           }
         else ++members;
@@ -216,7 +218,7 @@ int remove_members( const std::vector< std::string > & filenames,
       if( !in && member_list.damaged )
         {
         if( !safe_seek( infd, mb.pos() ) )
-          { error = true; if( retval < 1 ) retval = 1; break; }
+          { error = true; set_retval( retval, 1 ); break; }
         in = ( test_member_from_file( infd, mb.size() ) != 0 );	// damaged
         }
       if( !in )
@@ -225,7 +227,7 @@ int remove_members( const std::vector< std::string > & filenames,
             ( !safe_seek( infd, mb.pos() ) ||
               !safe_seek( fd, stream_pos ) ||
               !copy_file( infd, fd, mb.size() ) ) )
-          { error = true; if( retval < 1 ) retval = 1; break; }
+          { error = true; set_retval( retval, 1 ); break; }
         stream_pos += mb.size();
         }
       else ++members;
@@ -233,7 +235,7 @@ int remove_members( const std::vector< std::string > & filenames,
     if( error ) { close( fd ); close( infd ); break; }
     if( stream_pos == 0 )			// all members were removed
       { show_file_error( filename, "All members would be removed, skipping." );
-        close( fd ); close( infd ); if( retval < 2 ) retval = 2;
+        close( fd ); close( infd ); set_retval( retval, 2 );
         members = prev_members; continue; }
     const long long cdata_size = lzip_index.cdata_size();
     if( cdata_size > stream_pos )
@@ -248,7 +250,7 @@ int remove_members( const std::vector< std::string > & filenames,
             ( !safe_seek( infd, cdata_size ) ||
               !safe_seek( fd, stream_pos ) ||
               !copy_file( infd, fd, trailing_size ) ) )
-          { close( fd ); close( infd ); if( retval < 1 ) retval = 1; break; }
+          { close( fd ); close( infd ); set_retval( retval, 1 ); break; }
         stream_pos += trailing_size;
         }
       else { removed_tsize += trailing_size; ++tfiles; }
@@ -261,12 +263,12 @@ int remove_members( const std::vector< std::string > & filenames,
     if( result != 0 )
       {
       show_file_error( filename, "Can't truncate file", errno );
-      close( fd ); close( infd ); if( retval < 1 ) retval = 1; break;
+      close( fd ); close( infd ); set_retval( retval, 1 ); break;
       }
     if( close( fd ) != 0 || close( infd ) != 0 )
       {
       show_file_error( filename, "Error closing file", errno );
-      if( retval < 1 ) { retval = 1; } break;
+      set_retval( retval, 1 ); break;
       }
     struct utimbuf t;
     t.actime = in_stats.st_atime;

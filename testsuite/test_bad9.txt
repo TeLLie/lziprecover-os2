@@ -1,0 +1,5 @@
+General
+Public License instead of this License.
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 2, June 1991
+

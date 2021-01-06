@@ -8,7 +8,8 @@ SHELL = /bin/sh
 CAN_RUN_INSTALLINFO = $(SHELL) -c "install-info --version" > /dev/null 2>&1
 
 objs = arg_parser.o alone_to_lz.o lzip_index.o list.o dump_remove.o \
-       merge.o mtester.o range_dec.o repair.o split.o decoder.o main.o
+       lunzcrash.o md5.o merge.o mtester.o nrep_stats.o range_dec.o \
+       repair.o reproduce.o split.o decoder.o main.o
 unzobjs = arg_parser.o unzcrash.o
 
 
@@ -42,12 +43,16 @@ arg_parser.o  : arg_parser.h
 decoder.o     : lzip.h decoder.h
 dump_remove.o : lzip.h lzip_index.h
 list.o        : lzip.h lzip_index.h
+lunzcrash.o   : lzip.h md5.h mtester.h lzip_index.h
 lzip_index.o  : lzip.h lzip_index.h
 main.o        : arg_parser.h lzip.h decoder.h main_common.cc
+md5.o         : md5.h
 merge.o       : lzip.h decoder.h lzip_index.h
-mtester.o     : lzip.h mtester.h
+mtester.o     : lzip.h md5.h mtester.h
+nrep_stats.o  : lzip.h lzip_index.h
 range_dec.o   : lzip.h decoder.h lzip_index.h
 repair.o      : lzip.h mtester.h lzip_index.h
+reproduce.o   : lzip.h md5.h mtester.h lzip_index.h
 split.o       : lzip.h lzip_index.h
 unzcrash.o    : Makefile arg_parser.h main_common.cc
 
@@ -87,7 +92,7 @@ install-info :
 	-rm -f "$(DESTDIR)$(infodir)/$(pkgname).info"*
 	$(INSTALL_DATA) $(VPATH)/doc/$(pkgname).info "$(DESTDIR)$(infodir)/$(pkgname).info"
 	-if $(CAN_RUN_INSTALLINFO) ; then \
-		install-info --info-dir="$(DESTDIR)$(infodir)" "$(DESTDIR)$(infodir)/$(pkgname).info" ; \
+	  install-info --info-dir="$(DESTDIR)$(infodir)" "$(DESTDIR)$(infodir)/$(pkgname).info" ; \
 	fi
 
 install-info-compress : install-info
@@ -112,7 +117,7 @@ uninstall-bin :
 
 uninstall-info :
 	-if $(CAN_RUN_INSTALLINFO) ; then \
-		install-info --info-dir="$(DESTDIR)$(infodir)" --remove "$(DESTDIR)$(infodir)/$(pkgname).info" ; \
+	  install-info --info-dir="$(DESTDIR)$(infodir)" --remove "$(DESTDIR)$(infodir)/$(pkgname).info" ; \
 	fi
 	-rm -f "$(DESTDIR)$(infodir)/$(pkgname).info"*
 
@@ -139,7 +144,9 @@ dist : doc
 	  $(DISTNAME)/testsuite/fox6_bad1.txt \
 	  $(DISTNAME)/testsuite/test.txt \
 	  $(DISTNAME)/testsuite/test21723.txt \
+	  $(DISTNAME)/testsuite/test_bad[6-9].txt \
 	  $(DISTNAME)/testsuite/fox.lz \
+	  $(DISTNAME)/testsuite/fox_*.lz \
 	  $(DISTNAME)/testsuite/fox6.lz \
 	  $(DISTNAME)/testsuite/fox6_sc[1-6].lz \
 	  $(DISTNAME)/testsuite/fox6_bad[1-6].lz \
@@ -147,7 +154,8 @@ dist : doc
 	  $(DISTNAME)/testsuite/numbersbt.lz \
 	  $(DISTNAME)/testsuite/test.txt.lz \
 	  $(DISTNAME)/testsuite/test.txt.lzma \
-	  $(DISTNAME)/testsuite/test_bad[1-5].lz
+	  $(DISTNAME)/testsuite/test_bad[1-9].lz \
+	  $(DISTNAME)/testsuite/test_em.txt.lz
 	rm -f $(DISTNAME)
 	lzip -v -9 $(DISTNAME).tar
 

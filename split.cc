@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -71,7 +71,8 @@ int split_file( const std::string & input_filename,
                 const std::string & default_output_filename, const bool force )
   {
   struct stat in_stats;
-  const int infd = open_instream( input_filename.c_str(), &in_stats, true, true );
+  const int infd =
+    open_instream( input_filename.c_str(), &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   Lzip_index lzip_index( infd, true, true, true, true );
@@ -115,15 +116,13 @@ int split_file( const std::string & input_filename,
     const Block & mb = lzip_index.mblock( i );
     if( mb.pos() > stream_pos )					// gap
       {
-      if( !open_outstream( force, false, false, false ) )
-        { close( infd ); return 1; }
+      if( !open_outstream( force, true, false, false ) ) return 1;
       if( !copy_file( infd, outfd, mb.pos() - stream_pos ) ||
           close_outstream( &in_stats ) != 0 )
         cleanup_and_fail( 1 );
       next_filename( max_digits );
       }
-    if( !open_outstream( force, false, false, false ) )		// member
-      { close( infd ); return 1; }
+    if( !open_outstream( force, true, false, false ) ) return 1;  // member
     if( !copy_file( infd, outfd, mb.size() ) ||
         close_outstream( &in_stats ) != 0 )
       cleanup_and_fail( 1 );
@@ -132,8 +131,7 @@ int split_file( const std::string & input_filename,
     }
   if( lzip_index.file_size() > stream_pos )		// trailing data
     {
-    if( !open_outstream( force, false, false, false ) )
-      { close( infd ); return 1; }
+    if( !open_outstream( force, true, false, false ) ) return 1;
     if( !copy_file( infd, outfd, lzip_index.file_size() - stream_pos ) ||
         close_outstream( &in_stats ) != 0 )
       cleanup_and_fail( 1 );

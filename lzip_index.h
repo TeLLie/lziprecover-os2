@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 class Lzip_index
@@ -30,21 +30,28 @@ class Lzip_index
     bool operator!=( const Member & m ) const { return ( mblock != m.mblock ); }
     };
 
-  // member_vector only contains good members.
+  // member_vector only contains members with a valid header.
   // Garbage between members is represented by gaps between mblocks.
   std::vector< Member > member_vector;
   std::string error_;
   long long insize;
   int retval_;
+  unsigned dictionary_size_;	// largest dictionary size in the file
 
+  bool check_header_error( const Lzip_header & header,
+                           const bool ignore_bad_ds );
   void set_errno_error( const char * const msg );
   void set_num_error( const char * const msg, unsigned long long num );
-  bool skip_gap( const int fd, long long & pos,
-         const bool ignore_trailing, const bool loose_trailing,
-         const bool ignore_bad_ds, const bool ignore_gaps );
+  bool read_header( const int fd, Lzip_header & header, const long long pos );
+  bool read_trailer( const int fd, Lzip_trailer & trailer,
+                     const long long pos );
+  bool skip_gap( const int fd, unsigned long long & pos,
+                 const bool ignore_trailing, const bool loose_trailing,
+                 const bool ignore_bad_ds, const bool ignore_gaps );
 
 public:
-  Lzip_index() : error_( "No index" ), insize( 0 ), retval_( 2 ) {}
+  Lzip_index()
+    : error_( "No index" ), insize( 0 ), retval_( 2 ), dictionary_size_( 0 ) {}
   Lzip_index( const int infd, const bool ignore_trailing,
               const bool loose_trailing, const bool ignore_bad_ds = false,
               const bool ignore_gaps = false, const long long max_pos = 0 );
@@ -54,6 +61,7 @@ public:
   long blocks( const bool count_tdata ) const;	// members + gaps [+ tdata]
   const std::string & error() const { return error_; }
   int retval() const { return retval_; }
+  unsigned dictionary_size() const { return dictionary_size_; }
 
   bool operator==( const Lzip_index & li ) const
     {

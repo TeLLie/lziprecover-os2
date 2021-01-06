@@ -1,18 +1,18 @@
-/*  Lziprecover - Data recovery tool for the lzip format
-    Copyright (C) 2009-2019 Antonio Diaz Diaz.
+/* Lziprecover - Data recovery tool for the lzip format
+   Copyright (C) 2009-2021 Antonio Diaz Diaz.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 2 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -206,7 +206,7 @@ long ipow( const unsigned base, const unsigned exponent )
   unsigned long result = 1;
   for( unsigned i = 0; i < exponent; ++i )
     {
-    if( LONG_MAX / base >= result ) result *= base;
+    if( LONG_MAX / result >= base ) result *= base;
     else { result = LONG_MAX; break; }
     }
   return result;
@@ -229,7 +229,7 @@ int open_input_files( const std::vector< std::string > & filenames,
     {
     struct stat in_stats;				// not used
     infd_vector[i] = open_instream( filenames[i].c_str(),
-                     ( i == 0 ) ? in_statsp : &in_stats, true, true );
+                     ( i == 0 ) ? in_statsp : &in_stats, false, true );
     if( infd_vector[i] < 0 ) return 1;
     if( !file_crc( crc_vector[i], infd_vector[i], filenames[i].c_str() ) )
       return 1;
@@ -344,7 +344,7 @@ bool color_done( const std::vector< int > & color_vector, const int i )
   }
 
 
-     // try dividing blocks in 2 color groups at every gap
+// try dividing blocks in 2 color groups at every gap
 bool try_merge_member2( const long long mpos, const long long msize,
                         const std::vector< Block > & block_vector,
                         const std::vector< int > & color_vector,
@@ -390,7 +390,7 @@ bool try_merge_member2( const long long mpos, const long long msize,
   }
 
 
-     // merge block by block
+// merge block by block
 bool try_merge_member( const long long mpos, const long long msize,
                        const std::vector< Block > & block_vector,
                        const std::vector< int > & color_vector,
@@ -447,7 +447,7 @@ bool try_merge_member( const long long mpos, const long long msize,
   }
 
 
-     // merge a single block split at every possible position
+// merge a single block split at every possible position
 bool try_merge_member1( const long long mpos, const long long msize,
                         const std::vector< Block > & block_vector,
                         const std::vector< int > & color_vector,
@@ -562,7 +562,7 @@ int test_member_from_file( const int infd, const unsigned long long msize,
 
 int merge_files( const std::vector< std::string > & filenames,
                  const std::string & default_output_filename,
-                 const bool force, const char terminator )
+                 const char terminator, const bool force )
   {
   const int files = filenames.size();
   std::vector< int > infd_vector( files );
@@ -576,7 +576,7 @@ int merge_files( const std::vector< std::string > & filenames,
   output_filename = default_output_filename.empty() ?
                     insert_fixed( filenames[0] ) : default_output_filename;
   set_signal_handler();
-  if( !open_outstream( force, false, true, false ) ) return 1;
+  if( !open_outstream( force, true, true, false ) ) return 1;
   if( !copy_file( infd_vector[0], outfd ) )		// copy whole file
     cleanup_and_fail( 1 );
 
@@ -611,21 +611,19 @@ int merge_files( const std::vector< std::string > & filenames,
       }
 
     bool done = false;
-    if( lzip_index.members() > 1 || block_vector.size() > 1 )
+    if( block_vector.size() > 1 )
       {
-      if( block_vector.size() > 1 )
-        {
-        maybe_cluster_blocks( block_vector );
-        done = try_merge_member2( mpos, msize, block_vector, color_vector,
-                                  infd_vector, terminator );
-        print_pending_newline( terminator );
-        }
-      if( !done )
-        {
-        done = try_merge_member( mpos, msize, block_vector, color_vector,
-                                 infd_vector, terminator );
-        print_pending_newline( terminator );
-        }
+      maybe_cluster_blocks( block_vector );
+      done = try_merge_member2( mpos, msize, block_vector, color_vector,
+                                infd_vector, terminator );
+      print_pending_newline( terminator );
+      }
+    // With just one member and one differing block the merge can't succeed.
+    if( !done && ( lzip_index.members() > 1 || block_vector.size() > 1 ) )
+      {
+      done = try_merge_member( mpos, msize, block_vector, color_vector,
+                               infd_vector, terminator );
+      print_pending_newline( terminator );
       }
     if( !done )
       {
