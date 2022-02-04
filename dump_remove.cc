@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -48,6 +48,8 @@ int dump_members( const std::vector< std::string > & filenames,
     set_signal_handler();
     if( !open_outstream( force, false, false, false ) ) return 1;
     }
+  if( ( strip || !member_list.tdata || member_list.damaged || member_list.range() ) &&
+      !check_tty_out() ) return 1;	// check tty except for --dump=tdata
   unsigned long long copied_size = 0, stripped_size = 0;
   unsigned long long copied_tsize = 0, stripped_tsize = 0;
   long members = 0, smembers = 0;

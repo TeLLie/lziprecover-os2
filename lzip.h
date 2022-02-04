@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -14,6 +14,8 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
+#include "common.h"
 
 class State
   {
@@ -30,11 +32,7 @@ public:
     static const int next[states] = { 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 4, 5 };
     st = next[st];
     }
-  bool is_char_set_char()
-    {
-    if( st < 7 ) { st -= ( st < 4 ) ? st : 3; return true; }
-    else { st -= ( st < 10 ) ? 3 : 6; return false; }
-    }
+  bool is_char_set_char() { set_char(); return st < 4; }
   void set_match()     { st = ( st < 7 ) ? 7 : 10; }
   void set_rep()       { st = ( st < 7 ) ? 8 : 11; }
   void set_short_rep() { st = ( st < 7 ) ? 9 : 11; }
@@ -172,6 +170,7 @@ public:
   void update_byte( uint32_t & crc, const uint8_t byte ) const
     { crc = data[(crc^byte)&0xFF] ^ ( crc >> 8 ); }
 
+  // about as fast as it is possible without messing with endianness
   void update_buf( uint32_t & crc, const uint8_t * const buffer,
                    const int size ) const
     {
@@ -319,23 +318,6 @@ struct Lzip_trailer
   };
 
 
-struct Bad_byte
-  {
-  enum Mode { literal, delta, flip };
-  long long pos;
-  Mode mode;
-  uint8_t value;
-
-  Bad_byte() : pos( -1 ), mode( literal ), value( 0 ) {}
-  uint8_t operator()( const uint8_t old_value ) const
-    {
-    if( mode == delta ) return old_value + value;
-    if( mode == flip ) return old_value ^ value;
-    return value;
-    }
-  };
-
-
 #ifndef INT64_MAX
 #define INT64_MAX  0x7FFFFFFFFFFFFFFFLL
 #endif
@@ -381,7 +363,7 @@ struct Member_list	// members/gaps/tdata to be dumped/removed/stripped
   std::vector< Block > range_vector, rrange_vector;
 
   Member_list() : damaged( false ), tdata( false ), in( true ), rin( true ) {}
-  void parse( const char * p );
+  void parse_ml( const char * p, const char * const option_name );
 
   bool range() const { return range_vector.size() || rrange_vector.size(); }
 
@@ -451,7 +433,8 @@ int seek_read( const int fd, uint8_t * const buf, const int size,
                const long long pos );
 
 // defined in lunzcrash.cc
-int lunzcrash( const std::string & input_filename );
+int lunzcrash_bit( const char * const input_filename );
+int lunzcrash_block( const char * const input_filename, const int sector_size );
 int md5sum_files( const std::vector< std::string > & filenames );
 
 // defined in main.cc
@@ -470,14 +453,10 @@ bool open_outstream( const bool force, const bool protect,
                      const bool rw = false, const bool skipping = true );
 bool file_exists( const std::string & filename );
 void cleanup_and_fail( const int retval );
+bool check_tty_out();
 void set_signal_handler();
 int close_outstream( const struct stat * const in_statsp );
 std::string insert_fixed( std::string name );
-void show_error( const char * const msg, const int errcode = 0,
-                 const bool help = false );
-void show_file_error( const char * const filename, const char * const msg,
-                      const int errcode = 0 );
-void internal_error( const char * const msg );
 void show_2file_error( const char * const msg1, const char * const name1,
                        const char * const name2, const char * const msg2 );
 class Range_decoder;

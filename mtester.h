@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 
 class Range_mtester
   {
-  const uint8_t * const buffer;	// input buffer
+  const uint8_t * const buffer;		// input buffer
   const long long buffer_size;
   long long pos;			// current pos in buffer
   uint32_t code;
@@ -96,37 +96,78 @@ public:
       }
     else
       {
-      range -= bound;
       code -= bound;
+      range -= bound;
       bm.probability -= bm.probability >> bit_model_move_bits;
       return 1;
       }
     }
 
-  unsigned decode_tree3( Bit_model bm[] )
+  void decode_symbol_bit( Bit_model & bm, unsigned & symbol )
     {
-    unsigned symbol = 2 | decode_bit( bm[1] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
-    return symbol & 7;
+    normalize();
+    symbol <<= 1;
+    const uint32_t bound = ( range >> bit_model_total_bits ) * bm.probability;
+    if( code < bound )
+      {
+      range = bound;
+      bm.probability +=
+        ( bit_model_total - bm.probability ) >> bit_model_move_bits;
+      }
+    else
+      {
+      code -= bound;
+      range -= bound;
+      bm.probability -= bm.probability >> bit_model_move_bits;
+      symbol |= 1;
+      }
+    }
+
+  void decode_symbol_bit_reversed( Bit_model & bm, unsigned & model,
+                                   unsigned & symbol, const int i )
+    {
+    normalize();
+    model <<= 1;
+    const uint32_t bound = ( range >> bit_model_total_bits ) * bm.probability;
+    if( code < bound )
+      {
+      range = bound;
+      bm.probability +=
+        ( bit_model_total - bm.probability ) >> bit_model_move_bits;
+      }
+    else
+      {
+      code -= bound;
+      range -= bound;
+      bm.probability -= bm.probability >> bit_model_move_bits;
+      model |= 1;
+      symbol |= 1 << i;
+      }
     }
 
   unsigned decode_tree6( Bit_model bm[] )
     {
-    unsigned symbol = 2 | decode_bit( bm[1] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
-    symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+    unsigned symbol = 1;
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
     return symbol & 0x3F;
     }
 
   unsigned decode_tree8( Bit_model bm[] )
     {
     unsigned symbol = 1;
-    for( int i = 0; i < 8; ++i )
-      symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
     return symbol & 0xFF;
     }
 
@@ -135,20 +176,18 @@ public:
     unsigned model = 1;
     unsigned symbol = 0;
     for( int i = 0; i < num_bits; ++i )
-      {
-      const unsigned bit = decode_bit( bm[model] );
-      model <<= 1; model += bit;
-      symbol |= ( bit << i );
-      }
+      decode_symbol_bit_reversed( bm[model], model, symbol, i );
     return symbol;
     }
 
   unsigned decode_tree_reversed4( Bit_model bm[] )
     {
-    unsigned symbol = decode_bit( bm[1] );
-    symbol += decode_bit( bm[2+symbol] ) << 1;
-    symbol += decode_bit( bm[4+symbol] ) << 2;
-    symbol += decode_bit( bm[8+symbol] ) << 3;
+    unsigned model = 1;
+    unsigned symbol = 0;
+    decode_symbol_bit_reversed( bm[model], model, symbol, 0 );
+    decode_symbol_bit_reversed( bm[model], model, symbol, 1 );
+    decode_symbol_bit_reversed( bm[model], model, symbol, 2 );
+    decode_symbol_bit_reversed( bm[model], model, symbol, 3 );
     return symbol;
     }
 
@@ -163,8 +202,7 @@ public:
       symbol <<= 1; symbol |= bit;
       if( match_bit >> 8 != bit )
         {
-        while( symbol < 0x100 )
-          symbol = ( symbol << 1 ) | decode_bit( bm[symbol] );
+        while( symbol < 0x100 ) decode_symbol_bit( bm[symbol], symbol );
         break;
         }
       }
@@ -173,11 +211,24 @@ public:
 
   unsigned decode_len( Len_model & lm, const int pos_state )
     {
+    Bit_model * bm;
+    unsigned mask, offset, symbol = 1;
+
     if( decode_bit( lm.choice1 ) == 0 )
-      return decode_tree3( lm.bm_low[pos_state] );
+      { bm = lm.bm_low[pos_state]; mask = 7; offset = 0; goto len3; }
     if( decode_bit( lm.choice2 ) == 0 )
-      return len_low_symbols + decode_tree3( lm.bm_mid[pos_state] );
-    return len_low_symbols + len_mid_symbols + decode_tree8( lm.bm_high );
+      { bm = lm.bm_mid[pos_state]; mask = 7; offset = len_low_symbols; goto len3; }
+    bm = lm.bm_high; mask = 0xFF; offset = len_low_symbols + len_mid_symbols;
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+len3:
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    decode_symbol_bit( bm[symbol], symbol );
+    return ( symbol & mask ) + min_match_len + offset;
     }
   };
 
@@ -206,6 +257,7 @@ class LZ_mtester
   unsigned max_packet_size_;		// maximum packet size found
   unsigned max_marker_size_;		// maximum marker size found
   bool pos_wrapped;
+  bool buffer_is_external;
 
   Bit_model bm_literal[1<<literal_context_bits][0x300];
   Bit_model bm_match[State::states][pos_states];
@@ -306,11 +358,11 @@ public:
     max_rep0( 0 ),
     max_packet_size_( 0 ),
     max_marker_size_( 0 ),
-    pos_wrapped( false )
+    pos_wrapped( false ), buffer_is_external( false )
     // prev_byte of first byte; also for peek( 0 ) on corrupt file
     { buffer[dictionary_size-1] = 0; }
 
-  ~LZ_mtester() { delete[] buffer; }
+  ~LZ_mtester() { if( !buffer_is_external ) delete[] buffer; }
 
   unsigned crc() const { return crc_ ^ 0xFFFFFFFFU; }
   unsigned long long data_position() const { return partial_data_pos + pos; }
@@ -324,13 +376,14 @@ public:
   unsigned max_packet_size() const { return max_packet_size_; }
   unsigned max_marker_size() const { return max_marker_size_; }
 
-  const uint8_t * get_buffers( const uint8_t ** prev_bufferp,
-                               int * sizep, int * prev_sizep ) const
+  const uint8_t * get_buffers( const uint8_t ** const prev_bufferp,
+                               int * const sizep, int * const prev_sizep ) const
     { *sizep = ( pos_wrapped && pos == 0 ) ? dictionary_size : pos;
       *prev_sizep = ( pos_wrapped && pos > 0 ) ? dictionary_size - pos : 0;
       *prev_bufferp = buffer + pos; return buffer; }
 
-  void duplicate_buffer();
+  void duplicate_buffer( uint8_t * const buffer2 );
+
   // these two functions set max_rep0
   int test_member( const unsigned long long mpos_limit = LLONG_MAX,
                    const unsigned long long dpos_limit = LLONG_MAX,

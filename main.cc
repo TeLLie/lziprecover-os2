@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
    Exit status: 0 for a normal exit, 1 for environmental problems
    (file not found, invalid flags, I/O errors, etc), 2 to indicate a
    corrupt or invalid input file, 3 for an internal consistency error
-   (eg, bug) which caused lziprecover to panic.
+   (e.g., bug) which caused lziprecover to panic.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -39,9 +39,9 @@
 #include <unistd.h>
 #include <utime.h>
 #include <sys/stat.h>
-#if defined(__MSVCRT__) || defined(__OS2__) || defined(__DJGPP__)
+#if defined __MSVCRT__ || defined __OS2__ || defined __DJGPP__
 #include <io.h>
-#if defined(__MSVCRT__)
+#if defined __MSVCRT__
 #define fchmod(x,y) 0
 #define fchown(x,y,z) 0
 #define SIGHUP SIGTERM
@@ -53,7 +53,7 @@
 #define S_IWOTH 0
 #endif
 #endif
-#if defined(__DJGPP__)
+#if defined __DJGPP__
 #define S_ISSOCK(x) 0
 #define S_ISVTX 0
 #endif
@@ -69,6 +69,11 @@
 
 #if CHAR_BIT != 8
 #error "Environments where CHAR_BIT != 8 are not supported."
+#endif
+
+#if ( defined  SIZE_MAX &&  SIZE_MAX < UINT_MAX ) || \
+    ( defined SSIZE_MAX && SSIZE_MAX <  INT_MAX )
+#error "Environments where 'size_t' is narrower than 'int' are not supported."
 #endif
 
 int verbosity = 0;
@@ -89,7 +94,8 @@ const struct { const char * from; const char * to; } known_extensions[] = {
 enum Mode { m_none, m_alone_to_lz, m_debug_decompress, m_debug_delay,
             m_debug_repair, m_decompress, m_dump, m_list, m_md5sum, m_merge,
             m_nrep_stats, m_range_dec, m_remove, m_repair, m_reproduce,
-            m_show_packets, m_split, m_strip, m_test, m_unzcrash };
+            m_show_packets, m_split, m_strip, m_test, m_unzcrash_bit,
+            m_unzcrash_block };
 
 /* Variable used in signal handler context.
    It is not declared volatile because the handler never returns. */
@@ -100,14 +106,12 @@ void show_help()
   {
   std::printf( "Lziprecover is a data recovery tool and decompressor for files in the lzip\n"
                "compressed data format (.lz). Lziprecover is able to repair slightly damaged\n"
-               "files, produce a correct file by merging the good parts of two or more\n"
-               "damaged copies, reproduce a missing (zeroed) sector using a reference file,\n"
-               "extract data from damaged files, decompress files, and test integrity of\n"
-               "files.\n"
-               "\nLziprecover can repair perfectly most files with small errors (up to one\n"
-               "single-byte error per member), without the need of any extra redundance\n"
-               "at all. Losing an entire archive just because of a corrupt byte near the\n"
-               "beginning is a thing of the past.\n"
+               "files (up to one single-byte error per member), produce a correct file by\n"
+               "merging the good parts of two or more damaged copies, reproduce a missing\n"
+               "(zeroed) sector using a reference file, extract data from damaged files,\n"
+               "decompress files, and test integrity of files.\n"
+               "\nWith the help of lziprecover, losing an entire archive just because of a\n"
+               "corrupt byte near the beginning is a thing of the past.\n"
                "\nLziprecover can remove the damaged members from multimember files, for\n"
                "example multimember tar.lz archives.\n"
                "\nLziprecover provides random access to the data in multimember files; it only\n"
@@ -150,7 +154,7 @@ void show_help()
                  "  -E, --debug-reproduce=<range>[,ss]  set range to 0 and try to reproduce file\n"
                  "  -M, --md5sum                      print the MD5 digests of the input files\n"
                  "  -S, --nrep-stats[=<val>]          print stats of N-byte repeated sequences\n"
-                 "  -U, --unzcrash                    test 1-bit errors in the input file\n"
+                 "  -U, --unzcrash=1|B<size>          test 1-bit or block errors in input file\n"
                  "  -W, --debug-decompress=<pos>,<val>  set pos to val and decompress to stdout\n"
                  "  -X, --show-packets[=<pos>,<val>]  show in stdout the decoded LZMA packets\n"
                  "  -Y, --debug-delay=<range>         find max error detection delay in <range>\n"
@@ -164,7 +168,7 @@ void show_help()
                "'tar -xf foo.tar.lz' or 'lziprecover -cd foo.tar.lz | tar -xf -'.\n"
                "\nExit status: 0 for a normal exit, 1 for environmental problems (file\n"
                "not found, invalid flags, I/O errors, etc), 2 to indicate a corrupt or\n"
-               "invalid input file, 3 for an internal consistency error (eg, bug) which\n"
+               "invalid input file, 3 for an internal consistency error (e.g., bug) which\n"
                "caused lziprecover to panic.\n"
                "\nReport bugs to lzip-bug@nongnu.org\n"
                "Lziprecover home page: http://www.nongnu.org/lzip/lziprecover.html\n" );
@@ -174,16 +178,14 @@ void show_help()
 
 void Pretty_print::operator()( const char * const msg, FILE * const f ) const
   {
-  if( verbosity >= 0 )
+  if( verbosity < 0 ) return;
+  if( first_post )
     {
-    if( first_post )
-      {
-      first_post = false;
-      std::fputs( padded_name.c_str(), f );
-      if( !msg ) std::fflush( f );
-      }
-    if( msg ) std::fprintf( f, "%s\n", msg );
+    first_post = false;
+    std::fputs( padded_name.c_str(), f );
+    if( !msg ) std::fflush( f );
     }
+  if( msg ) std::fprintf( f, "%s\n", msg );
   }
 
 
@@ -225,41 +227,41 @@ void show_header( const unsigned dictionary_size )
 
 
 // Colon-separated list of "damaged", "tdata", [r][^]<list> (1 1,3-5,8)
-void Member_list::parse( const char * p )
+void Member_list::parse_ml( const char * arg, const char * const option_name )
   {
   while( true )
     {
-    const char * tp = p;	// points to terminator; ':' or null
+    const char * tp = arg;		// points to terminator (':' or '\0')
     while( *tp && *tp != ':' ) ++tp;
-    const unsigned len = tp - p;
-    if( std::isalpha( *(const unsigned char *)p ) )
+    const unsigned len = tp - arg;
+    if( std::islower( *(const unsigned char *)arg ) )
       {
-      if( len <= 7 && std::strncmp( "damaged", p, len ) == 0 )
+      if( len <= 7 && std::strncmp( "damaged", arg, len ) == 0 )
         { damaged = true; goto next; }
-      if( len <= 5 && std::strncmp( "tdata", p, len ) == 0 )
+      if( len <= 5 && std::strncmp( "tdata", arg, len ) == 0 )
         { tdata = true; goto next; }
       }
     {
-    const bool reverse = ( *p == 'r' );
-    if( reverse ) ++p;
-    if( *p == '^' ) { ++p; if( reverse ) rin = false; else in = false; }
+    const bool reverse = ( *arg == 'r' );
+    if( reverse ) ++arg;
+    if( *arg == '^' ) { ++arg; if( reverse ) rin = false; else in = false; }
     std::vector< Block > * rvp = reverse ? &rrange_vector : &range_vector;
-    while( std::isdigit( *(const unsigned char *)p ) )
+    while( std::isdigit( *(const unsigned char *)arg ) )
       {
       const char * tail;
-      const int pos = getnum( p, 0, 1, INT_MAX, &tail ) - 1;
+      const int pos = getnum( arg, option_name, 0, 1, INT_MAX, &tail ) - 1;
       if( rvp->size() && pos < rvp->back().end() ) break;
       const int size = (*tail == '-') ?
-        getnum( tail + 1, 0, pos + 1, INT_MAX, &tail ) - pos : 1;
+        getnum( tail + 1, option_name, 0, pos + 1, INT_MAX, &tail ) - pos : 1;
       rvp->push_back( Block( pos, size ) );
       if( tail == tp ) goto next;
-      if( *tail == ',' ) p = tail + 1; else break;
+      if( *tail == ',' ) arg = tail + 1; else break;
       }
     }
     show_error( "Invalid list of members." );
     std::exit( 1 );
 next:
-    if( *(p = tp) != 0 ) ++p; else return;
+    if( *(arg = tp) != 0 ) ++arg; else return;
     }
   }
 
@@ -268,67 +270,57 @@ namespace {
 
 // Recognized formats: <digit> 'a' m[<match_length>]
 //
-int parse_lzip_level( const char * const p )
+int parse_lzip_level( const char * const arg, const char * const option_name )
   {
-  if( *p == 'a' || std::isdigit( *(const unsigned char *)p ) ) return *p;
-  if( *p != 'm' )
+  if( *arg == 'a' || std::isdigit( *(const unsigned char *)arg ) ) return *arg;
+  if( *arg != 'm' )
     {
-    show_error( "Bad argument in option '--lzip-level'.", 0, true );
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Bad argument in option '%s'.\n",
+                    program_name, option_name );
     std::exit( 1 );
     }
-  if( p[1] == 0 ) return -1;
-  return -getnum( p + 1, 0, min_match_len_limit, max_match_len );
+  if( arg[1] == 0 ) return -1;
+  return -getnum( arg + 1, option_name, 0, min_match_len_limit, max_match_len );
   }
 
 
 /* Recognized format: <range>[,<sector_size>]
    range formats: <begin> <begin>-<end> <begin>,<size> ,<size>
 */
-void parse_range( const char * const ptr, Block & range,
-                  int * const sector_sizep = 0 )
+void parse_range( const char * const arg, const char * const pn,
+                  Block & range, int * const sector_sizep = 0 )
   {
-  const char * tail = ptr;
+  const char * tail = arg;
   long long value =
-    ( ptr[0] == ',' ) ? 0 : getnum( ptr, 0, 0, INT64_MAX - 1, &tail );
+    ( arg[0] == ',' ) ? 0 : getnum( arg, pn, 0, 0, INT64_MAX - 1, &tail );
   if( tail[0] == 0 || tail[0] == ',' || tail[0] == '-' )
     {
     range.pos( value );
     if( tail[0] == 0 ) { range.size( INT64_MAX - value ); return; }
     const bool is_size = ( tail[0] == ',' );
     if( sector_sizep && tail[1] == ',' ) { value = INT64_MAX - value; ++tail; }
-    else value = getnum( tail + 1, 0, 1, INT64_MAX, &tail );	// size
-    if( is_size || value > range.pos() )
+    else value = getnum( tail + 1, pn, 0, 1, INT64_MAX, &tail );	// size
+    if( !is_size && value <= range.pos() )
       {
-      if( !is_size ) value -= range.pos();
-      if( INT64_MAX - range.pos() >= value )
-        {
-        range.size( value );
-        if( sector_sizep && tail[0] == ',' )
-          *sector_sizep = getnum( tail + 1, 0, 8, INT_MAX );
-        return;
-        }
+      if( verbosity >= 0 )
+        std::fprintf( stderr, "%s: Begin must be < end in range argument "
+                      "of option '%s'.\n", program_name, pn );
+      std::exit( 1 );
+      }
+    if( !is_size ) value -= range.pos();
+    if( INT64_MAX - value >= range.pos() )
+      {
+      range.size( value );
+      if( sector_sizep && tail[0] == ',' )
+        *sector_sizep = getnum( tail + 1, pn, 0, 8, INT_MAX );
+      return;
       }
     }
-  show_error( "Bad decompression range.", 0, true );
+  if( verbosity >= 0 )
+    std::fprintf( stderr, "%s: Bad decompression range in option '%s'.\n",
+                  program_name, pn );
   std::exit( 1 );
-  }
-
-
-// Recognized formats: <pos>,<value> <pos>,+<value> <pos>,f<value>
-//
-void parse_pos_value( const char * const ptr, Bad_byte & bad_byte )
-  {
-  const char * tail;
-  bad_byte.pos = getnum( ptr, 0, 0, INT64_MAX, &tail );
-  if( tail[0] != ',' )
-    {
-    show_error( "Bad separator between <pos> and <val>.", 0, true );
-    std::exit( 1 );
-    }
-  if( tail[1] == '+' ) { ++tail; bad_byte.mode = Bad_byte::delta; }
-  else if( tail[1] == 'f' ) { ++tail; bad_byte.mode = Bad_byte::flip; }
-  else bad_byte.mode = Bad_byte::literal;
-  bad_byte.value = getnum( tail + 1, 0, 0, 255 );
   }
 
 
@@ -350,6 +342,23 @@ void set_mode( Mode & program_mode, const Mode new_mode )
     std::exit( 1 );
     }
   program_mode = new_mode;
+  }
+
+
+void parse_u( const char * const arg, const char * const option_name,
+              Mode & program_mode, int & sector_size )
+  {
+  if( arg[0] == '1' ) set_mode( program_mode, m_unzcrash_bit );
+  else if( arg[0] == 'B' )
+    { set_mode( program_mode, m_unzcrash_block );
+      sector_size = getnum( arg + 1, option_name, 0, 1, INT_MAX ); }
+  else
+    {
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Bad argument for option '%s'.\n",
+                    program_name, option_name );
+    std::exit( 1 );
+    }
   }
 
 
@@ -506,6 +515,17 @@ void cleanup_and_fail( const int retval )
   std::exit( retval );
   }
 
+
+bool check_tty_out()
+  {
+  if( isatty( outfd ) )
+    { show_file_error( output_filename.size() ?
+                       output_filename.c_str() : "(stdout)",
+                       "I won't write compressed data to a terminal." );
+      return false; }
+  return true;
+  }
+
 namespace {
 
 extern "C" void signal_handler( int )
@@ -521,21 +541,14 @@ bool check_tty_in( const char * const input_filename, const int infd,
   if( isatty( infd ) )			// all modes read compressed data
     { show_file_error( input_filename,
                        "I won't read compressed data from a terminal." );
-      close( infd ); set_retval( retval, 1 );
+      close( infd ); set_retval( retval, 2 );
       if( program_mode != m_test ) cleanup_and_fail( retval );
       return false; }
   return true;
   }
 
 bool check_tty_out( const Mode program_mode )
-  {
-  if( program_mode == m_alone_to_lz && isatty( outfd ) )
-    { show_file_error( output_filename.size() ?
-                       output_filename.c_str() : "(stdout)",
-                       "I won't write compressed data to a terminal." );
-      return false; }
-  return true;
-  }
+  { return program_mode != m_alone_to_lz || ::check_tty_out(); }
 
 
 // Set permissions, owner, and times.
@@ -611,9 +624,10 @@ int decompress( const unsigned long long cfile_size, const int infd,
                 const bool ignore_trailing, const bool loose_trailing,
                 const bool testing )
   {
-  int retval = 0;
   unsigned long long partial_file_pos = 0;
   Range_decoder rdec( infd );
+  int retval = 0;
+
   for( bool first_member = true; ; first_member = false )
     {
     Lzip_header header;
@@ -708,16 +722,6 @@ std::string insert_fixed( std::string name )
   }
 
 
-void show_file_error( const char * const filename, const char * const msg,
-                      const int errcode )
-  {
-  if( verbosity >= 0 )
-    std::fprintf( stderr, "%s: %s: %s%s%s\n", program_name, filename, msg,
-                  ( errcode > 0 ) ? ": " : "",
-                  ( errcode > 0 ) ? std::strerror( errcode ) : "" );
-  }
-
-
 void show_2file_error( const char * const msg1, const char * const name1,
                        const char * const name2, const char * const msg2 )
   {
@@ -765,7 +769,6 @@ int main( const int argc, const char * const argv[] )
   Bad_byte bad_byte;
   Member_list member_list;
   std::string default_output_filename;
-  std::vector< std::string > filenames;
   const char * lzip_name = "lzip";		// default is lzip
   const char * reference_filename = 0;
   Mode program_mode = m_none;
@@ -805,7 +808,7 @@ int main( const int argc, const char * const argv[] )
     { 's', "split",              Arg_parser::no  },
     { 'S', "nrep-stats",         Arg_parser::maybe },
     { 't', "test",               Arg_parser::no  },
-    { 'U', "unzcrash",           Arg_parser::no  },
+    { 'U', "unzcrash",           Arg_parser::yes },
     { 'v', "verbose",            Arg_parser::no  },
     { 'V', "version",            Arg_parser::no  },
     { 'W', "debug-decompress",   Arg_parser::yes },
@@ -830,6 +833,7 @@ int main( const int argc, const char * const argv[] )
     {
     const int code = parser.code( argind );
     if( !code ) break;					// no more options
+    const char * const pn = parser.parsed_name( argind ).c_str();
     const std::string & sarg = parser.argument( argind );
     const char * const arg = sarg.c_str();
     switch( code )
@@ -839,10 +843,10 @@ int main( const int argc, const char * const argv[] )
       case 'c': to_stdout = true; break;
       case 'd': set_mode( program_mode, m_decompress ); break;
       case 'D': set_mode( program_mode, m_range_dec );
-                parse_range( arg, range ); break;
+                parse_range( arg, pn, range ); break;
       case 'e': set_mode( program_mode, m_reproduce ); break;
       case 'E': set_mode( program_mode, m_reproduce );
-                parse_range( arg, range, &sector_size ); break;
+                parse_range( arg, pn, range, &sector_size ); break;
       case 'f': force = true; break;
       case 'h': show_help(); return 0;
       case 'i': ignore_errors = true; break;
@@ -856,35 +860,35 @@ int main( const int argc, const char * const argv[] )
       case 'q': verbosity = -1; break;
       case 'R': set_mode( program_mode, m_repair ); break;
       case 's': set_mode( program_mode, m_split ); break;
-      case 'S': if( arg[0] ) repeated_byte = getnum( arg, 0, 0, 255 );
+      case 'S': if( arg[0] ) repeated_byte = getnum( arg, pn, 0, 0, 255 );
                 set_mode( program_mode, m_nrep_stats ); break;
       case 't': set_mode( program_mode, m_test ); break;
-      case 'U': set_mode( program_mode, m_unzcrash ); break;
+      case 'U': parse_u( arg, pn, program_mode, sector_size ); break;
       case 'v': if( verbosity < 4 ) ++verbosity; break;
       case 'V': show_version(); return 0;
       case 'W': set_mode( program_mode, m_debug_decompress );
-                parse_pos_value( arg, bad_byte ); break;
+                bad_byte.parse_bb( arg, pn ); break;
       case 'X': set_mode( program_mode, m_show_packets );
-                if( arg[0] ) { parse_pos_value( arg, bad_byte ); } break;
+                if( arg[0] ) { bad_byte.parse_bb( arg, pn ); } break;
       case 'Y': set_mode( program_mode, m_debug_delay );
-                parse_range( arg, range ); break;
+                parse_range( arg, pn, range ); break;
       case 'Z': set_mode( program_mode, m_debug_repair );
-                parse_pos_value( arg, bad_byte ); break;
+                bad_byte.parse_bb( arg, pn ); break;
       case opt_du: set_mode( program_mode, m_dump );
-                   member_list.parse( arg ); break;
+                   member_list.parse_ml( arg, pn ); break;
       case opt_lt: loose_trailing = true; break;
-      case opt_lzl: lzip_level = parse_lzip_level( arg ); break;
+      case opt_lzl: lzip_level = parse_lzip_level( arg, pn ); break;
       case opt_lzn: lzip_name = arg; break;
       case opt_ref: reference_filename = arg; break;
       case opt_re: set_mode( program_mode, m_remove );
-                   member_list.parse( arg ); break;
+                   member_list.parse_ml( arg, pn ); break;
       case opt_st: set_mode( program_mode, m_strip );
-                   member_list.parse( arg ); break;
+                   member_list.parse_ml( arg, pn ); break;
       default : internal_error( "uncaught option." );
       }
     } // end process options
 
-#if defined(__MSVCRT__) || defined(__OS2__) || defined(__DJGPP__)
+#if defined __MSVCRT__ || defined __OS2__ || defined __DJGPP__
   setmode( STDIN_FILENO, O_BINARY );
   setmode( STDOUT_FILENO, O_BINARY );
 #endif
@@ -895,6 +899,7 @@ int main( const int argc, const char * const argv[] )
     return 1;
     }
 
+  std::vector< std::string > filenames;
   bool filenames_given = false;
   for( ; argind < parser.arguments(); ++argind )
     {
@@ -963,9 +968,12 @@ int main( const int argc, const char * const argv[] )
       one_file( filenames.size() );
       return split_file( filenames[0], default_output_filename, force );
     case m_test: break;
-    case m_unzcrash:
+    case m_unzcrash_bit:
       one_file( filenames.size() );
-      return lunzcrash( filenames[0] );
+      return lunzcrash_bit( filenames[0].c_str() );
+    case m_unzcrash_block:
+      one_file( filenames.size() );
+      return lunzcrash_block( filenames[0].c_str(), sector_size );
     }
     }
   catch( std::bad_alloc & ) { show_error( mem_msg ); cleanup_and_fail( 1 ); }

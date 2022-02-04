@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -52,7 +52,7 @@ int fatal_retval = 0;
 int fatal( const int retval )
   { if( fatal_retval == 0 ) fatal_retval = retval; return retval; }
 
-// Returns the position of the damaged area in the member, or -1 if error.
+// Return the position of the damaged area in the member, or -1 if error.
 long long zeroed_sector_pos( const char * const input_filename,
                         const uint8_t * const mbuffer, const long long msize,
                         long long * const sizep, uint8_t * const valuep )
@@ -121,7 +121,7 @@ const LZ_mtester * prepare_master2( const uint8_t * const mbuffer,
    beginning of the file or to the beginning of the dictionary.
    Choose the match nearest to the beginning of the file.
    As a fallback, locate the longest partial match at least 512 bytes long.
-   Returns the offset in file of the first undecoded byte, or -1 if no match. */
+   Return the offset in file of the first undecoded byte, or -1 if no match. */
 long long match_file( const LZ_mtester & master, const uint8_t * const rbuf,
                       const long long rsize,
                       const char * const reference_filename )
@@ -222,8 +222,9 @@ void show_fork_error( const char * const prog_name )
   }
 
 
-/* Returns -1 if child not terminated, 1 in case of error, or exit status of
-   child process 'pid'. */
+/* Return -1 if child not terminated, 1 in case of error, or exit status of
+   child process 'pid'.
+*/
 int child_status( const pid_t pid, const char * const name )
   {
   int status;
@@ -245,7 +246,7 @@ int child_status( const pid_t pid, const char * const name )
   }
 
 
-// Returns exit status of child process 'pid', or 1 in case of error.
+// Return exit status of child process 'pid', or 1 in case of error.
 //
 int wait_for_child( const pid_t pid, const char * const name )
   {

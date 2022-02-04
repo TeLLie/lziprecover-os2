@@ -1,6 +1,6 @@
 #! /bin/sh
 # check script for Lziprecover - Data recovery tool for the lzip format
-# Copyright (C) 2009-2021 Antonio Diaz Diaz.
+# Copyright (C) 2009-2022 Antonio Diaz Diaz.
 #
 # This script is free software: you have unlimited permission
 # to copy, distribute, and modify it.
@@ -270,15 +270,21 @@ lines=$("${LZIP}" -tvv "${in_em}" 2>&1 | wc -l) || test_failed $LINENO
 lines=$("${LZIP}" -lvv "${in_em}" | wc -l) || test_failed $LINENO
 [ "${lines}" -eq 11 ] || test_failed $LINENO "${lines}"
 
+"${LZIP}" -cd "${fox_lz}" > fox || test_failed $LINENO
 cat "${in_lz}" > copy.lz || framework_failure
 "${LZIP}" -dk copy.lz || test_failed $LINENO
 cmp in copy || test_failed $LINENO
-printf "to be overwritten" > copy || framework_failure
-"${LZIP}" -d copy.lz 2> /dev/null
+cat fox > copy || framework_failure
+cat "${in_lz}" > out.lz || framework_failure
+rm -f out || framework_failure
+"${LZIP}" -d copy.lz out.lz 2> /dev/null	# skip copy, decompress out
 [ $? = 1 ] || test_failed $LINENO
+cmp fox copy || test_failed $LINENO
+cmp in out || test_failed $LINENO
 "${LZIP}" -df copy.lz || test_failed $LINENO
 [ ! -e copy.lz ] || test_failed $LINENO
 cmp in copy || test_failed $LINENO
+rm -f out || framework_failure
 
 printf "to be overwritten" > copy || framework_failure
 "${LZIP}" -df -o copy < "${in_lz}" || test_failed $LINENO
@@ -308,7 +314,7 @@ rm -f copy anyothername.out || framework_failure
 [ $? = 1 ] || test_failed $LINENO
 "${LZIP}" -cdq in "${in_lz}" > copy
 [ $? = 2 ] || test_failed $LINENO
-cat copy in | cmp in - || test_failed $LINENO
+cat copy in | cmp in - || test_failed $LINENO		# copy must be empty
 "${LZIP}" -cdq nx_file.lz "${in_lz}" > copy
 [ $? = 1 ] || test_failed $LINENO
 cmp in copy || test_failed $LINENO
@@ -448,7 +454,6 @@ for i in fox_v2.lz fox_s11.lz fox_de20.lz \
 	[ $? = 2 ] || test_failed $LINENO $i
 done
 
-"${LZIP}" -cd "${fox_lz}" > fox || test_failed $LINENO
 for i in fox_bcrc.lz fox_crc0.lz fox_das46.lz fox_mes81.lz ; do
 	"${LZIP}" -cdq "${testdir}"/$i > out
 	[ $? = 2 ] || test_failed $LINENO $i

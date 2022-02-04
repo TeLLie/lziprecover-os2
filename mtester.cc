@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -64,14 +64,14 @@ void LZ_mtester::print_block( const int len )
   }
 
 
-void LZ_mtester::duplicate_buffer()
+void LZ_mtester::duplicate_buffer( uint8_t * const buffer2 )
   {
-  uint8_t * const tmp = new uint8_t[dictionary_size];
   if( data_position() > 0 )
-    std::memcpy( tmp, buffer, std::min( data_position(),
-                                        (unsigned long long)dictionary_size ) );
-  else tmp[dictionary_size-1] = 0;		// prev_byte of first byte
-  buffer = tmp;
+    std::memcpy( buffer2, buffer, std::min( data_position(),
+                                    (unsigned long long)dictionary_size ) );
+  else buffer2[dictionary_size-1] = 0;		// prev_byte of first byte
+  buffer = buffer2;
+  buffer_is_external = true;
   }
 
 
@@ -103,7 +103,7 @@ bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
     return false;
     }
   const unsigned long long data_size = data_position();
-  const unsigned long long member_size = member_position();
+  const unsigned long long member_size = rdec.member_position();
   bool error = false;
 
   const unsigned td_crc = trailer->data_crc();
@@ -190,11 +190,11 @@ int LZ_mtester::test_member( const unsigned long long mpos_limit,
         rep0 = distance;
         }
       state.set_rep();
-      len = min_match_len + rdec.decode_len( rep_len_model, pos_state );
+      len = rdec.decode_len( rep_len_model, pos_state );
       }
     else					// match
       {
-      len = min_match_len + rdec.decode_len( match_len_model, pos_state );
+      len = rdec.decode_len( match_len_model, pos_state );
       unsigned distance = rdec.decode_tree6( bm_dis_slot[get_len_state(len)] );
       if( distance >= start_dis_model )
         {
@@ -230,11 +230,11 @@ int LZ_mtester::test_member( const unsigned long long mpos_limit,
       if( rep0 > max_rep0 ) max_rep0 = rep0;
       state.set_match();
       if( rep0 >= dictionary_size || ( rep0 >= pos && !pos_wrapped ) )
-        { flush_data(); return 1; }
+        { if( outfd >= 0 ) { flush_data(); } return 1; }
       }
     copy_block( rep0, len );
     }
-  flush_data();
+  if( outfd >= 0 ) flush_data();
   return 2;
   }
 
@@ -312,14 +312,14 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
         rep0 = distance;
         }
       state.set_rep();
-      len = min_match_len + rdec.decode_len( rep_len_model, pos_state );
+      len = rdec.decode_len( rep_len_model, pos_state );
       if( show_packets )
         std::printf( "%6llu %6llu  rep%c  %6u,%3d (%6llu)",
                      mp, dp, rep + '0', rep0 + 1, len, dp - rep0 - 1 );
       }
     else					// match
       {
-      len = min_match_len + rdec.decode_len( match_len_model, pos_state );
+      len = rdec.decode_len( match_len_model, pos_state );
       unsigned distance = rdec.decode_tree6( bm_dis_slot[get_len_state(len)] );
       if( distance >= start_dis_model )
         {

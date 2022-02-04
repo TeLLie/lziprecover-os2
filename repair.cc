@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -107,10 +107,11 @@ const LZ_mtester * prepare_master( const uint8_t * const buffer,
   }
 
 
-bool test_member_rest( const LZ_mtester & master, long * const failure_posp = 0 )
+bool test_member_rest( const LZ_mtester & master, uint8_t * const buffer2,
+                       long * const failure_posp = 0 )
   {
-  LZ_mtester mtester( master );
-  mtester.duplicate_buffer();
+  LZ_mtester mtester( master );		// tester with external buffer
+  mtester.duplicate_buffer( buffer2 );
   if( mtester.test_member() == 0 && mtester.finished() ) return true;
   if( failure_posp ) *failure_posp = mtester.member_position();
   return false;
@@ -122,13 +123,14 @@ long repair_member( const long long mpos, const long long msize,
                     uint8_t * const mbuffer, const long begin, const long end,
                     const unsigned dictionary_size, const char terminator )
   {
+  uint8_t * const buffer2 = new uint8_t[dictionary_size];
   for( long pos = end; pos >= begin && pos > end - 50000; )
     {
     const long min_pos = std::max( begin, pos - 100 );
     const unsigned long pos_limit = std::max( min_pos - 16, 0L );
     const LZ_mtester * master =
       prepare_master( mbuffer, msize, pos_limit, dictionary_size );
-    if( !master ) return -1;
+    if( !master ) { delete[] buffer2; return -1; }
     for( ; pos >= min_pos; --pos )
       {
       if( verbosity >= 2 )
@@ -139,12 +141,14 @@ long repair_member( const long long mpos, const long long msize,
       for( int j = 0; j < 255; ++j )
         {
         ++mbuffer[pos];
-        if( test_member_rest( *master ) ) { delete master; return pos; }
+        if( test_member_rest( *master, buffer2 ) )
+          { delete master; delete[] buffer2; return pos; }
         }
       ++mbuffer[pos];
       }
     delete master;
     }
+  delete[] buffer2;
   return 0;
   }
 
@@ -297,6 +301,7 @@ int debug_delay( const std::string & input_filename, Block range,
       }
     uint8_t * const mbuffer = read_member( infd, mpos, msize );
     if( !mbuffer ) return 1;
+    uint8_t * const buffer2 = new uint8_t[dictionary_size];
     long pos = std::max( range.pos() - mpos, Lzip_header::size + 1LL );
     const long end = std::min( range.end() - mpos, msize );
     long max_delay = 0;
@@ -305,8 +310,8 @@ int debug_delay( const std::string & input_filename, Block range,
       const unsigned long pos_limit = std::max( pos - 16, 0L );
       const LZ_mtester * master =
         prepare_master( mbuffer, msize, pos_limit, dictionary_size );
-      if( !master )
-        { show_error( "Can't prepare master." ); return 1; }
+      if( !master ) { show_error( "Can't prepare master." );
+                      delete[] buffer2; delete[] mbuffer; return 1; }
       const long partial_end = std::min( pos + 100, end );
       for( ; pos < partial_end; ++pos )
         {
@@ -321,7 +326,7 @@ int debug_delay( const std::string & input_filename, Block range,
           ++mbuffer[pos];
           if( j == 255 ) break;
           long failure_pos = 0;
-          if( test_member_rest( *master, &failure_pos ) ) continue;
+          if( test_member_rest( *master, buffer2, &failure_pos ) ) continue;
           const long delay = failure_pos - pos;
           if( delay > max_delay ) { max_delay = delay; value = mbuffer[pos]; }
           }
@@ -335,6 +340,7 @@ int debug_delay( const std::string & input_filename, Block range,
         }
       delete master;
       }
+    delete[] buffer2;
     delete[] mbuffer;
     print_pending_newline( terminator );
     }
@@ -386,19 +392,15 @@ int debug_repair( const std::string & input_filename,
   long failure_pos = 0;
   if( bad_byte.pos != 5 || isvalid_ds( header.dictionary_size() ) )
     {
-    const LZ_mtester * master =
-      prepare_master( mbuffer, msize, 0, header.dictionary_size() );
-    if( !master )
-      { show_error( "Can't prepare master." ); delete[] mbuffer; return 1; }
-    if( test_member_rest( *master, &failure_pos ) )
+    LZ_mtester mtester( mbuffer, msize, header.dictionary_size() );
+    if( mtester.test_member() == 0 && mtester.finished() )
       {
       if( verbosity >= 1 )
         std::fputs( "Member decompressed with no errors.\n", stdout );
-      delete master;
       delete[] mbuffer;
       return 0;
       }
-    delete master;
+    failure_pos = mtester.member_position();
     }
   if( verbosity >= 2 )
     {
@@ -435,6 +437,7 @@ int debug_repair( const std::string & input_filename,
    the packet, not counting the data present in the range decoder before and
    after the decoding. The max marker size of a 'Sync Flush marker' does not
    include the 5 bytes read by rdec.load).
+   if bad_byte.pos >= cdata_size, bad_byte is ignored.
 */
 int debug_decompress( const std::string & input_filename,
                       const Bad_byte & bad_byte, const bool show_packets )
@@ -499,7 +502,9 @@ int debug_decompress( const std::string & input_filename,
         std::printf( "%s at pos %llu\n", ( result == 2 ) ?
                      "File ends unexpectedly" : "Decoder error",
                      mpos + mtester.member_position() );
-      retval = 2; break;
+      retval = 2;
+      if( result != 3 || !mtester.finished() || mtester.data_position() !=
+          (unsigned long long)lzip_index.dblock( i ).size() ) break;
       }
     if( i + 1 < lzip_index.members() && show_packets )
       std::fputc( '\n', stdout );

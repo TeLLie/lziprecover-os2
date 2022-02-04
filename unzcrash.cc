@@ -1,6 +1,6 @@
 /* Unzcrash - Tests robustness of decompressors to corrupted data.
    Inspired by unzcrash.c from Julian Seward's bzip2.
-   Copyright (C) 2008-2021 Antonio Diaz Diaz.
+   Copyright (C) 2008-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -19,35 +19,35 @@
    Exit status: 0 for a normal exit, 1 for environmental problems
    (file not found, invalid flags, I/O errors, etc), 2 to indicate a
    corrupt or invalid input file, 3 for an internal consistency error
-   (eg, bug) which caused unzcrash to panic.
+   (e.g., bug) which caused unzcrash to panic.
 */
 
 #define _FILE_OFFSET_BITS 64
 
 #include <algorithm>
 #include <cerrno>
-#include <climits>
+#include <climits>		// SSIZE_MAX
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
-#include <stdint.h>
+#include <stdint.h>		// SIZE_MAX
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include "arg_parser.h"
+#include "common.h"
 
 #if CHAR_BIT != 8
 #error "Environments where CHAR_BIT != 8 are not supported."
 #endif
 
-#ifndef INT64_MAX
-#define INT64_MAX  0x7FFFFFFFFFFFFFFFLL
+#if ( defined  SIZE_MAX &&  SIZE_MAX < ULONG_MAX ) || \
+    ( defined SSIZE_MAX && SSIZE_MAX <  LONG_MAX )
+#error "Environments where 'size_t' is narrower than 'long' are not supported."
 #endif
-
-void show_error( const char * const msg, const int errcode = 0,
-                 const bool help = false );
 
 namespace {
 
@@ -103,7 +103,7 @@ void show_help()
                "A negative size is relative to the rest of the file.\n"
                "\nExit status: 0 for a normal exit, 1 for environmental problems (file\n"
                "not found, invalid flags, I/O errors, etc), 2 to indicate a corrupt or\n"
-               "invalid input file, 3 for an internal consistency error (eg, bug) which\n"
+               "invalid input file, 3 for an internal consistency error (e.g., bug) which\n"
                "caused unzcrash to panic.\n"
                "\nReport bugs to lzip-bug@nongnu.org\n"
                "Lziprecover home page: http://www.nongnu.org/lzip/lziprecover.html\n" );
@@ -111,66 +111,32 @@ void show_help()
 
 } // end namespace
 
-
 #include "main_common.cc"
-
 
 namespace {
 
-void parse_block( const char * const ptr, long & size, uint8_t & value )
+void parse_block( const char * const arg, const char * const option_name,
+                  long & size, uint8_t & value )
   {
-  const char * tail = ptr;
+  const char * tail = arg;
 
   if( tail[0] != ',' )
-    size = getnum( ptr, 0, 1, INT_MAX, &tail );
+    size = getnum( arg, option_name, 0, 1, INT_MAX, &tail );
   if( tail[0] == ',' )
-    value = getnum( tail + 1, 0, 0, 255 );
+    value = getnum( tail + 1, option_name, 0, 0, 255 );
   else if( tail[0] )
     {
-    show_error( "Bad separator in argument of '--block'", 0, true );
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Bad separator between <size> and <value> in "
+                    "argument of option '%s'.\n", program_name, option_name );
     std::exit( 1 );
     }
   }
 
 
-struct Bad_byte
-  {
-  enum Mode { literal, delta, flip };
-  long long pos;
-  Mode mode;
-  uint8_t value;
-
-  Bad_byte() : pos( -1 ), mode( literal ), value( 0 ) {}
-  uint8_t operator()( const uint8_t old_value ) const
-    {
-    if( mode == delta ) return old_value + value;
-    if( mode == flip ) return old_value ^ value;
-    return value;
-    }
-  };
-
-
-// Recognized formats: <pos>,<value> <pos>,+<value> <pos>,f<value>
-//
-void parse_pos_value( const char * const ptr, Bad_byte & bad_byte )
-  {
-  const char * tail;
-  bad_byte.pos = getnum( ptr, 0, 0, INT64_MAX, &tail );
-  if( tail[0] != ',' )
-    {
-    show_error( "Bad separator between <pos> and <val>.", 0, true );
-    std::exit( 1 );
-    }
-  if( tail[1] == '+' ) { ++tail; bad_byte.mode = Bad_byte::delta; }
-  else if( tail[1] == 'f' ) { ++tail; bad_byte.mode = Bad_byte::flip; }
-  else bad_byte.mode = Bad_byte::literal;
-  bad_byte.value = getnum( tail + 1, 0, 0, 255 );
-  }
-
-
-/* Returns the address of a malloc'd buffer containing the file data and
+/* Return the address of a malloc'd buffer containing the file data and
    the file size in '*size'.
-   In case of error, returns 0 and does not modify '*size'.
+   In case of error, return 0 and do not modify '*size'.
 */
 uint8_t * read_file( const char * const name, long * const size )
   {
@@ -228,7 +194,7 @@ public:
     { return ( i >= 1 && i <= 8 && data[i-1] ); }
 
   // Recognized formats: 1 1,2,3 1-4 1,3-5,8 1-3,5-8
-  bool parse( const char * p )
+  bool parse_bs( const char * p )
     {
     for( int i = 0; i < 8; ++i ) data[i] = false;
     while( true )
@@ -283,6 +249,116 @@ int differing_bits( const uint8_t byte1, const uint8_t byte2 )
   return count;
   }
 
+
+/* Return the number of bytes really written.
+   If (value returned < size), it is always an error.
+*/
+long writeblock( const int fd, const uint8_t * const buf, const long size )
+  {
+  long sz = 0;
+  errno = 0;
+  while( sz < size )
+    {
+    const long n = write( fd, buf + sz, size - sz );
+    if( n > 0 ) sz += n;
+    else if( n < 0 && errno != EINTR ) break;
+    errno = 0;
+    }
+  return sz;
+  }
+
+
+void show_exec_error( const char * const prog_name )
+  {
+  if( verbosity >= 0 )
+    std::fprintf( stderr, "%s: Can't exec '%s': %s\n",
+                  program_name, prog_name, std::strerror( errno ) );
+  }
+
+
+void show_fork_error( const char * const prog_name )
+  {
+  if( verbosity >= 0 )
+    std::fprintf( stderr, "%s: Can't fork '%s': %s\n",
+                  program_name, prog_name, std::strerror( errno ) );
+  }
+
+
+int wait_for_child( const pid_t pid, const char * const name )
+  {
+  int status;
+  while( waitpid( pid, &status, 0 ) == -1 )
+    {
+    if( errno != EINTR )
+      {
+      if( verbosity >= 0 )
+        std::fprintf( stderr, "%s: Error waiting termination of '%s': %s\n",
+                      program_name, name, std::strerror( errno ) );
+      return -1;
+      }
+    }
+  if( WIFEXITED( status ) )
+    { const int ret = WEXITSTATUS( status ); if( ret != 255 ) return ret; }
+  return -1;
+  }
+
+
+bool word_split( const char * const command, std::vector< std::string > & args )
+  {
+  const unsigned long old_size = args.size();
+  for( const char * p = command; *p; )
+    {
+    while( *p && std::isspace( *p ) ) ++p;	// strip leading space
+    if( !*p ) break;
+    if( *p == '\'' || *p == '"' )		// quoted name
+      {
+      const char quote = *p;
+      const char * const begin = ++p;		// skip leading quote
+      while( *p && *p != quote ) ++p;
+      if( !*p || begin == p ) return false;	// umbalanced or empty
+      args.push_back( std::string( begin, p - begin ) );
+      ++p; continue;				// skip trailing quote
+      }
+    const char * const begin = p++;
+    while( *p && !std::isspace( *p ) ) ++p;
+    args.push_back( std::string( begin, p - begin ) );
+    }
+  return args.size() > old_size;
+  }
+
+
+// return -1 if fatal error, 0 if OK, >0 if error
+int fork_and_feed( const uint8_t * const buffer, const long buffer_size,
+                   const char ** const argv, const bool verify = false )
+  {
+  int fda[2];				// pipe to child
+  if( pipe( fda ) < 0 )
+    { show_error( "Can't create pipe", errno ); return -1; }
+
+  const pid_t pid = vfork();
+  if( pid < 0 )				// parent
+    { show_fork_error( argv[0] ); return -1; }
+  else if( pid > 0 )			// parent (feed data to child)
+    {
+    if( close( fda[0] ) != 0 )
+      { show_error( "Error closing unused pipe", errno ); return -1; }
+    if( writeblock( fda[1], buffer, buffer_size ) != buffer_size && verify )
+      { show_error( "Can't write to child process", errno ); return -1; }
+    if( close( fda[1] ) != 0 )
+      { show_error( "Error closing pipe", errno ); return -1; }
+    }
+  else if( pid == 0 )			// child
+    {
+    if( dup2( fda[0], STDIN_FILENO ) >= 0 &&
+        close( fda[0] ) == 0 && close( fda[1] ) == 0 )
+      execvp( argv[0], (char **)argv );
+    show_exec_error( argv[0] );
+    _exit( 255 );		// 255 means fatal error in wait_for_child
+    }
+
+  return wait_for_child( pid, argv[0] );
+  }
+
 } // end namespace
 
 
@@ -290,7 +366,7 @@ int main( const int argc, const char * const argv[] )
   {
   enum Mode { m_block, m_byte, m_truncate };
   const char * mode_str[3] = { "block", "byte", "size" };
-  Bitset8 bits;			// if Bitset8::parse not called test full byte
+  Bitset8 bits;		// if Bitset8::parse_bs not called test full byte
   Bad_byte bad_byte;
   const char * zcmp_program = "zcmp";
   long pos = 0;
@@ -328,19 +404,20 @@ int main( const int argc, const char * const argv[] )
     {
     const int code = parser.code( argind );
     if( !code ) break;					// no more options
+    const char * const pn = parser.parsed_name( argind ).c_str();
     const char * const arg = parser.argument( argind ).c_str();
     switch( code )
       {
       case 'h': show_help(); return 0;
-      case 'b': if( !bits.parse( arg ) ) return 1; program_mode = m_byte; break;
-      case 'B': if( arg[0] ) parse_block( arg, block_size, block_value );
+      case 'b': if( !bits.parse_bs( arg ) ) return 1; program_mode = m_byte; break;
+      case 'B': if( arg[0] ) parse_block( arg, pn, block_size, block_value );
                 program_mode = m_block; break;
-      case 'd': delta = getnum( arg, block_size, 1, INT_MAX ); break;
-      case 'e': parse_pos_value( arg, bad_byte ); break;
+      case 'd': delta = getnum( arg, pn, block_size, 1, INT_MAX ); break;
+      case 'e': bad_byte.parse_bb( arg, pn ); break;
       case 'n': verify = false; break;
-      case 'p': pos = getnum( arg, block_size, -LONG_MAX, LONG_MAX ); break;
+      case 'p': pos = getnum( arg, pn, block_size, -LONG_MAX, LONG_MAX ); break;
       case 'q': verbosity = -1; break;
-      case 's': max_size = getnum( arg, block_size, -LONG_MAX, LONG_MAX ); break;
+      case 's': max_size = getnum( arg, pn, block_size, -LONG_MAX, LONG_MAX ); break;
       case 't': program_mode = m_truncate; break;
       case 'v': if( verbosity < 4 ) ++verbosity; break;
       case 'V': show_version(); return 0;
@@ -349,7 +426,7 @@ int main( const int argc, const char * const argv[] )
       }
     } // end process options
 
-  if( argind + 2 != parser.arguments() )
+  if( parser.arguments() - argind != 2 )
     {
     if( verbosity >= 0 )
       std::fprintf( stderr, "Usage: %s 'lzip -t' file.lz\n", invocation_name );
@@ -358,42 +435,68 @@ int main( const int argc, const char * const argv[] )
 
   if( delta <= 0 ) delta = ( program_mode == m_block ) ? block_size : 1;
 
+  const char * const command = parser.argument( argind ).c_str();
+  std::vector< std::string > command_args;
+  if( !word_split( command, command_args ) )
+    { show_file_error( command, "Invalid command" ); return 1; }
+  const char ** const command_argv = new const char *[command_args.size()+1];
+  for( unsigned i = 0; i < command_args.size(); ++i )
+    command_argv[i] = command_args[i].c_str();
+  command_argv[command_args.size()] = 0;
+
   const char * const filename = parser.argument( argind + 1 ).c_str();
   long file_size = 0;
   uint8_t * const buffer = read_file( filename, &file_size );
   if( !buffer ) return 1;
-  const char * const command = parser.argument( argind ).c_str();
-  char zcmp_command[1024] = { 0 };
+  std::string zcmp_command;
+  std::vector< std::string > zcmp_args;
+  const char ** zcmp_argv = 0;
   if( std::strcmp( zcmp_program, "false" ) != 0 )
-    snprintf( zcmp_command, sizeof zcmp_command, "%s '%s' -",
-              zcmp_program, filename );
+    {
+    zcmp_command = zcmp_program;
+    zcmp_command += " '"; zcmp_command += filename; zcmp_command += "' -";
+    if( !word_split( zcmp_command.c_str(), zcmp_args ) )
+      { show_file_error( zcmp_command.c_str(), "Invalid zcmp command" );
+        return 1; }
+    zcmp_argv = new const char *[zcmp_args.size()+1];
+    for( unsigned i = 0; i < zcmp_args.size(); ++i )
+      zcmp_argv[i] = zcmp_args[i].c_str();
+    zcmp_argv[zcmp_args.size()] = 0;
+    }
 
   // verify original file
   if( verbosity >= 1 ) fprintf( stderr, "Testing file '%s'\n", filename );
   if( verify )
     {
-    FILE * f = popen( command, "w" );
-    if( !f )
-      { show_error( "Can't open pipe to decompressor", errno ); return 1; }
-    if( (long)std::fwrite( buffer, 1, file_size, f ) != file_size )
-      { show_error( "Can't write to decompressor", errno ); return 1; }
-    if( pclose( f ) != 0 )
+    const int ret = fork_and_feed( buffer, file_size, command_argv, true );
+    if( ret != 0 )
       {
       if( verbosity >= 0 )
-        std::fprintf( stderr, "%s: Can't run '%s'.\n", program_name, command );
+        {
+        if( ret < 0 )
+          std::fprintf( stderr, "%s: Can't run '%s'.\n", program_name, command );
+        else
+          std::fprintf( stderr, "%s: \"%s\" failed (%d).\n",
+                        program_name, command, ret );
+        }
       return 1;
       }
-    if( zcmp_command[0] )
+    if( zcmp_command.size() )
       {
-      f = popen( zcmp_command, "w" );
-      if( !f )
-        { show_error( "Can't open pipe to zcmp command", errno ); return 1; }
-      if( (long)std::fwrite( buffer, 1, file_size, f ) != file_size )
-        { show_error( "Can't write to zcmp command", errno ); return 1; }
-      if( pclose( f ) != 0 )
+      const int ret = fork_and_feed( buffer, file_size, zcmp_argv, true );
+      if( ret != 0 )
         {
-        show_error( "zcmp command failed. Disabling comparisons" );
-        zcmp_command[0] = 0;
+        if( verbosity >= 0 )
+          {
+          if( ret < 0 )
+            std::fprintf( stderr, "%s: Can't run '%s'.\n",
+                          program_name, zcmp_command.c_str() );
+          else
+            std::fprintf( stderr, "%s: \"%s\" failed (%d). Disabling comparisons.\n",
+                          program_name, zcmp_command.c_str(), ret );
+          }
+        if( ret < 0 ) return 1;
+        zcmp_command.clear();
         }
       }
     }
@@ -407,31 +510,32 @@ int main( const int argc, const char * const argv[] )
   if( max_size < 0 ) max_size += file_size - pos;
   const long end = ( ( max_size < file_size - pos ) ? pos + max_size : file_size );
   if( bad_byte.pos >= file_size )
-    { show_error( "Position of '--set-byte' is beyond end of file." );
-      return 1; }
+    {
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Position is beyond end of file "
+                    "in option '%s'.\n", program_name, bad_byte.option_name );
+    return 1;
+    }
   if( bad_byte.pos >= 0 )
     buffer[bad_byte.pos] = bad_byte( buffer[bad_byte.pos] );
   long positions = 0, decompressions = 0, successes = 0, failed_comparisons = 0;
   if( program_mode == m_truncate )
     for( long i = pos; i < end; i += std::min( delta, end - i ) )
       {
-      if( verbosity >= 0 )
-        std::fprintf( stderr, "length %ld\n", i );
+      if( verbosity >= 1 ) std::fprintf( stderr, "length %ld\n", i );
       ++positions; ++decompressions;
-      FILE * f = popen( command, "w" );
-      if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
-      std::fwrite( buffer, 1, i, f );
-      if( pclose( f ) == 0 )
+      const int ret = fork_and_feed( buffer, i, command_argv );
+      if( ret < 0 ) return 1;
+      if( ret == 0 )
         {
         ++successes;
         if( verbosity >= 0 )
-          std::fputs( "passed the test\n", stderr );
-        if( zcmp_command[0] )
+          std::fprintf( stderr, "length %ld passed the test\n", i );
+        if( zcmp_command.size() )
           {
-          f = popen( zcmp_command, "w" );
-          if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
-          std::fwrite( buffer, 1, i, f );
-          if( pclose( f ) != 0 )
+          const int ret = fork_and_feed( buffer, i, zcmp_argv );
+          if( ret < 0 ) return 1;
+          if( ret > 0 )
             {
             ++failed_comparisons;
             if( verbosity >= 0 )
@@ -447,25 +551,22 @@ int main( const int argc, const char * const argv[] )
     for( long i = pos; i < end; i += std::min( delta, end - i ) )
       {
       const long size = std::min( block_size, file_size - i );
-      if( verbosity >= 0 )
-        std::fprintf( stderr, "block %ld,%ld\n", i, size );
+      if( verbosity >= 1 ) std::fprintf( stderr, "block %ld,%ld\n", i, size );
       ++positions; ++decompressions;
-      FILE * f = popen( command, "w" );
-      if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
-      std::memcpy( block , buffer + i, size );
+      std::memcpy( block, buffer + i, size );
       std::memset( buffer + i, block_value, size );
-      std::fwrite( buffer, 1, file_size, f );
-      if( pclose( f ) == 0 )
+      const int ret = fork_and_feed( buffer, file_size, command_argv );
+      if( ret < 0 ) return 1;
+      if( ret == 0 )
         {
         ++successes;
         if( verbosity >= 0 )
-          std::fputs( "passed the test\n", stderr );
-        if( zcmp_command[0] )
+          std::fprintf( stderr, "block %ld,%ld passed the test\n", i, size );
+        if( zcmp_command.size() )
           {
-          f = popen( zcmp_command, "w" );
-          if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
-          std::fwrite( buffer, 1, file_size, f );
-          if( pclose( f ) != 0 )
+          const int ret = fork_and_feed( buffer, file_size, zcmp_argv );
+          if( ret < 0 ) return 1;
+          if( ret > 0 )
             {
             ++failed_comparisons;
             if( verbosity >= 0 )
@@ -482,8 +583,7 @@ int main( const int argc, const char * const argv[] )
     if( verbosity >= 1 ) bits.print();
     for( long i = pos; i < end; i += std::min( delta, end - i ) )
       {
-      if( verbosity >= 0 )
-        std::fprintf( stderr, "byte %ld\n", i );
+      if( verbosity >= 1 ) std::fprintf( stderr, "byte %ld\n", i );
       ++positions;
       const uint8_t byte = buffer[i];
       for( int j = 1; j < 256; ++j )
@@ -495,23 +595,21 @@ int main( const int argc, const char * const argv[] )
           if( verbosity >= 2 )
             std::fprintf( stderr, "0x%02X (0x%02X+0x%02X) ",
                           buffer[i], byte, j );
-          FILE * f = popen( command, "w" );
-          if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
-          std::fwrite( buffer, 1, file_size, f );
-          if( pclose( f ) == 0 )
+          const int ret = fork_and_feed( buffer, file_size, command_argv );
+          if( ret < 0 ) return 1;
+          if( ret == 0 )
             {
             ++successes;
             if( verbosity >= 0 )
               { if( verbosity < 2 )	// else already printed above
                   std::fprintf( stderr, "0x%02X (0x%02X+0x%02X) ",
                                 buffer[i], byte, j );
-                std::fputs( "passed the test\n", stderr ); }
-            if( zcmp_command[0] )
+                std::fprintf( stderr, "byte %ld passed the test\n", i ); }
+            if( zcmp_command.size() )
               {
-              f = popen( zcmp_command, "w" );
-              if( !f ) { show_error( "Can't open pipe", errno ); return 1; }
-              std::fwrite( buffer, 1, file_size, f );
-              if( pclose( f ) != 0 )
+              const int ret = fork_and_feed( buffer, file_size, zcmp_argv );
+              if( ret < 0 ) return 1;
+              if( ret > 0 )
                 {
                 ++failed_comparisons;
                 if( verbosity >= 0 )
@@ -532,7 +630,7 @@ int main( const int argc, const char * const argv[] )
                   positions, mode_str[program_mode], decompressions, successes );
     if( successes > 0 )
       {
-      if( zcmp_command[0] == 0 )
+      if( zcmp_command.empty() )
         std::fputs( "\n         comparisons disabled\n", stderr );
       else if( failed_comparisons > 0 )
         std::fprintf( stderr, ", of which\n%8ld comparisons failed\n",

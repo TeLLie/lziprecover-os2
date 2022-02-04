@@ -2,10 +2,10 @@ Description
 
 Lziprecover is a data recovery tool and decompressor for files in the lzip
 compressed data format (.lz). Lziprecover is able to repair slightly damaged
-files, produce a correct file by merging the good parts of two or more
-damaged copies, reproduce a missing (zeroed) sector using a reference file,
-extract data from damaged files, decompress files, and test integrity of
-files.
+files (up to one single-byte error per member), produce a correct file by
+merging the good parts of two or more damaged copies, reproduce a missing
+(zeroed) sector using a reference file, extract data from damaged files,
+decompress files, and test integrity of files.
 
 Lziprecover can remove the damaged members from multimember files, for
 example multimember tar.lz archives.
@@ -51,7 +51,7 @@ provides recovery capabilities like those of lziprecover, which is able to
 find and combine the good parts of several damaged copies.
 
 Lziprecover is able to recover or decompress files produced by any of the
-compressors in the lzip family; lzip, plzip, minilzip/lzlib, clzip, and
+compressors in the lzip family: lzip, plzip, minilzip/lzlib, clzip, and
 pdlzip.
 
 If the cause of file corruption is a damaged medium, the combination
@@ -84,7 +84,7 @@ Julian Seward's bzip2. Type 'make unzcrash' in the lziprecover source
 directory to build it. Then try 'unzcrash --help'.
 
 
-Copyright (C) 2009-2021 Antonio Diaz Diaz.
+Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
 This file is free documentation: you have unlimited permission to copy,
 distribute, and modify it.

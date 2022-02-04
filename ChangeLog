@@ -1,3 +1,20 @@
+2022-01-21  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.23 released.
+	* Decompression time has been reduced by 5-12% depending on the file.
+	* main_common.cc (getnum): Show option name and valid range if error.
+	* dump_remove.cc (dump_members): Check tty except for --dump=tdata.
+	* Option '-U, --unzcrash' now takes an argument ('1' or 'B<size>').
+	* mtester.cc (duplicate_buffer): Use an external buffer.
+	* repair.cc (debug_decompress): Continue decoding on CRC mismatch.
+	* unzcrash.cc: Make zcmp_command a string of unlimited size.
+	  Use execvp instead of popen to avoid invoking /bin/sh.
+	  Print byte or block position in messages.
+	* New file common.h.
+	* Improve several descriptions in manual, '--help', and man page.
+	* lziprecover.texi: Change GNU Texinfo category to 'Compression'.
+	  (Reported by Alfred M. Szmidt).
+
 2021-01-02  Antonio Diaz Diaz  <antonio@gnu.org>
 
 	* Version 1.22 released.
@@ -45,7 +62,7 @@
 	* Print '\n' instead of '\r' if !isatty( 1 ) in merge, repair.
 	* main.cc: Compile on DOS with DJGPP.
 	* lziprecover.texi: New chapter 'Tarlz'.
-	* configure: Accept appending to CXXFLAGS, 'CXXFLAGS+=OPTIONS'.
+	* configure: Accept appending to CXXFLAGS; 'CXXFLAGS+=OPTIONS'.
 	* INSTALL: Document use of CXXFLAGS+='-D __USE_MINGW_ANSI_STDIO'.
 	* New test files fox.lz, fox6_sc[1-6].lz.
 
@@ -209,7 +226,7 @@
 	* unzcrash.cc: Test all 1-byte errors.
 
 
-Copyright (C) 2009-2021 Antonio Diaz Diaz.
+Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
 This file is a collection of facts, and thus it is not copyrightable,
 but just in case, you have unlimited permission to copy, distribute, and

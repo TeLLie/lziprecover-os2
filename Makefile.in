@@ -23,10 +23,10 @@ unzobjs = arg_parser.o unzcrash.o
 all : $(progname)
 
 $(progname) : $(objs)
-	$(CXX) $(LDFLAGS) $(CXXFLAGS) -o $@ $(objs)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(objs)
 
 unzcrash : $(unzobjs)
-	$(CXX) $(LDFLAGS) $(CXXFLAGS) -o $@ $(unzobjs)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(unzobjs)
 
 main.o : main.cc
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DPROGVERSION=\"$(pkgversion)\" -c -o $@ $<
@@ -38,6 +38,7 @@ unzcrash.o : unzcrash.cc
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
 
 $(objs)       : Makefile
+lzip.h        : common.h
 alone_to_lz.o : lzip.h mtester.h
 arg_parser.o  : arg_parser.h
 decoder.o     : lzip.h decoder.h

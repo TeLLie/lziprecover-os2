@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 
 namespace {
 
-const char * const program_year = "2021";
+const char * const program_year = "2022";
 const char * const mem_msg = "Not enough memory.";
 
 void show_version()
@@ -30,19 +30,58 @@ void show_version()
   }
 
 
+// separate large numbers >= 100_000 in groups of 3 digits using '_'
+const char * format_num3( long long num )
+  {
+  const char * const si_prefix = "kMGTPEZY";
+  const char * const binary_prefix = "KMGTPEZY";
+  enum { buffers = 8, bufsize = 4 * sizeof (long long) };
+  static char buffer[buffers][bufsize];	// circle of static buffers for printf
+  static int current = 0;
+
+  char * const buf = buffer[current++]; current %= buffers;
+  char * p = buf + bufsize - 1;		// fill the buffer backwards
+  *p = 0;	// terminator
+  const bool negative = num < 0;
+  if( negative ) num = -num;
+  if( num > 1024 )
+    {
+    char prefix = 0;			// try binary first, then si
+    for( int i = 0; i < 8 && num >= 1024 && num % 1024 == 0; ++i )
+      { num /= 1024; prefix = binary_prefix[i]; }
+    if( prefix ) *(--p) = 'i';
+    else
+      for( int i = 0; i < 8 && num >= 1000 && num % 1000 == 0; ++i )
+        { num /= 1000; prefix = si_prefix[i]; }
+    if( prefix ) *(--p) = prefix;
+    }
+  const bool split = num >= 100000;
+
+  for( int i = 0; ; )
+    {
+    *(--p) = num % 10 + '0'; num /= 10; if( num == 0 ) break;
+    if( split && ++i >= 3 ) { i = 0; *(--p) = '_'; }
+    }
+  if( negative ) *(--p) = '-';
+  return p;
+  }
+
+
 // Recognized formats: <num>[YZEPTGM][i][Bs], <num>k[Bs], <num>Ki[Bs]
 //
-long long getnum( const char * const ptr, const int hardbs,
-                  const long long llimit = -LLONG_MAX,
+long long getnum( const char * const arg, const char * const option_name,
+                  const int hardbs, const long long llimit = -LLONG_MAX,
                   const long long ulimit = LLONG_MAX,
                   const char ** const tailp = 0 )
   {
   char * tail;
   errno = 0;
-  long long result = strtoll( ptr, &tail, 0 );
-  if( tail == ptr )
+  long long result = strtoll( arg, &tail, 0 );
+  if( tail == arg )
     {
-    show_error( "Bad or missing numerical argument.", 0, true );
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Bad or missing numerical argument in "
+                    "option '%s'.\n", program_name, option_name );
     std::exit( 1 );
     }
 
@@ -73,7 +112,9 @@ long long getnum( const char * const ptr, const int hardbs,
     if( exponent < 0 || ( usuf == 's' && hardbs <= 0 ) ||
         ( !tailp && tail[0] != 0 ) )
       {
-      show_error( "Bad multiplier in numerical argument.", 0, true );
+      if( verbosity >= 0 )
+        std::fprintf( stderr, "%s: Bad multiplier in numerical argument of "
+                      "option '%s'.\n", program_name, option_name );
       std::exit( 1 );
       }
     for( int i = 0; i < exponent; ++i )
@@ -90,7 +131,10 @@ long long getnum( const char * const ptr, const int hardbs,
   if( !errno && ( result < llimit || result > ulimit ) ) errno = ERANGE;
   if( errno )
     {
-    show_error( "Numerical argument out of limits." );
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Numerical argument out of limits [%s,%s] "
+                    "in option '%s'.\n", program_name, format_num3( llimit ),
+                    format_num3( ulimit ), option_name );
     std::exit( 1 );
     }
   if( tailp ) *tailp = tail;
@@ -98,6 +142,27 @@ long long getnum( const char * const ptr, const int hardbs,
   }
 
 } // end namespace
+
+
+// Recognized formats: <pos>,<value> <pos>,+<value> <pos>,f<value>
+//
+void Bad_byte::parse_bb( const char * const arg, const char * const pn )
+  {
+  option_name = pn;
+  const char * tail;
+  pos = getnum( arg, option_name, 0, 0, LLONG_MAX, &tail );
+  if( tail[0] != ',' )
+    {
+    if( verbosity >= 0 )
+      std::fprintf( stderr, "%s: Bad separator between <pos> and <val> in "
+                    "argument of option '%s'.\n", program_name, option_name );
+    std::exit( 1 );
+    }
+  if( tail[1] == '+' ) { ++tail; mode = delta; }
+  else if( tail[1] == 'f' ) { ++tail; mode = flip; }
+  else mode = literal;
+  value = getnum( tail + 1, option_name, 0, 0, 255 );
+  }
 
 
 void show_error( const char * const msg, const int errcode, const bool help )
@@ -110,6 +175,16 @@ void show_error( const char * const msg, const int errcode, const bool help )
   if( help )
     std::fprintf( stderr, "Try '%s --help' for more information.\n",
                   invocation_name );
+  }
+
+
+void show_file_error( const char * const filename, const char * const msg,
+                      const int errcode )
+  {
+  if( verbosity >= 0 )
+    std::fprintf( stderr, "%s: %s: %s%s%s\n", program_name, filename, msg,
+                  ( errcode > 0 ) ? ": " : "",
+                  ( errcode > 0 ) ? std::strerror( errcode ) : "" );
   }
 
 

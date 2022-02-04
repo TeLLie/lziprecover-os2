@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -347,7 +347,7 @@ error:
   }
 
 
-// Returns members + gaps [+ trailing data].
+// Return members + gaps [+ trailing data].
 long Lzip_index::blocks( const bool count_tdata ) const
   {
   long n = member_vector.size() + ( count_tdata && cdata_size() < file_size() );

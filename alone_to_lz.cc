@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2021 Antonio Diaz Diaz.
+   Copyright (C) 2009-2022 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -35,9 +35,9 @@
 
 namespace {
 
-/* Returns the address of a malloc'd buffer containing the file data and
+/* Return the address of a malloc'd buffer containing the file data and
    the file size in '*size'. The buffer is at least 20 bytes larger.
-   In case of error, returns 0 and does not modify '*size'.
+   In case of error, return 0 and do not modify '*size'.
 */
 uint8_t * read_file( const int infd, long * const size,
                      const char * const filename )

@@ -1,5 +1,5 @@
 /* Arg_parser - POSIX/GNU command line argument parser. (C++ version)
-   Copyright (C) 2006-2021 Antonio Diaz Diaz.
+   Copyright (C) 2006-2022 Antonio Diaz Diaz.
 
    This library is free software. Redistribution and use in source and
    binary forms, with or without modification, are permitted provided
@@ -23,9 +23,9 @@
    In case of error, 'error' returns a non-empty error message.
 
    'options' is an array of 'struct Option' terminated by an element
-   containing a code which is zero. A null name means a short-only
-   option. A code value outside the unsigned char range means a
-   long-only option.
+   containing a code which is zero. A null long_name means a short-only
+   option. A code value outside the unsigned char range means a long-only
+   option.
 
    Arg_parser normally makes it appear as if all the option arguments
    were specified before all the non-option arguments for the purposes
@@ -48,7 +48,7 @@ public:
   struct Option
     {
     int code;			// Short option letter or code ( code != 0 )
-    const char * name;		// Long option name (maybe null)
+    const char * long_name;	// Long option name (maybe null)
     Has_arg has_arg;
     };
 
@@ -56,8 +56,12 @@ private:
   struct Record
     {
     int code;
+    std::string parsed_name;
     std::string argument;
-    explicit Record( const int c ) : code( c ) {}
+    explicit Record( const unsigned char c )
+      : code( c ), parsed_name( "-" ) { parsed_name += c; }
+    Record( const int c, const char * const long_name )
+      : code( c ), parsed_name( "--" ) { parsed_name += long_name; }
     explicit Record( const char * const arg ) : code( 0 ), argument( arg ) {}
     };
 
@@ -89,6 +93,13 @@ public:
     {
     if( i >= 0 && i < arguments() ) return data[i].code;
     else return 0;
+    }
+
+  // Full name of the option parsed (short or long).
+  const std::string & parsed_name( const int i ) const
+    {
+    if( i >= 0 && i < arguments() ) return data[i].parsed_name;
+    else return empty_arg;
     }
 
   const std::string & argument( const int i ) const
