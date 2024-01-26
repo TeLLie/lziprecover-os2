@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,8 +17,7 @@
 
 namespace {
 
-const char * const program_year = "2022";
-const char * const mem_msg = "Not enough memory.";
+const char * const program_year = "2024";
 
 void show_version()
   {
@@ -30,12 +29,12 @@ void show_version()
   }
 
 
-// separate large numbers >= 100_000 in groups of 3 digits using '_'
+// separate numbers of 5 or more digits in groups of 3 digits using '_'
 const char * format_num3( long long num )
   {
-  const char * const si_prefix = "kMGTPEZY";
-  const char * const binary_prefix = "KMGTPEZY";
-  enum { buffers = 8, bufsize = 4 * sizeof (long long) };
+  enum { buffers = 8, bufsize = 4 * sizeof num, n = 10 };
+  const char * const si_prefix = "kMGTPEZYRQ";
+  const char * const binary_prefix = "KMGTPEZYRQ";
   static char buffer[buffers][bufsize];	// circle of static buffers for printf
   static int current = 0;
 
@@ -43,23 +42,23 @@ const char * format_num3( long long num )
   char * p = buf + bufsize - 1;		// fill the buffer backwards
   *p = 0;	// terminator
   const bool negative = num < 0;
-  if( negative ) num = -num;
-  if( num > 1024 )
+  if( num > 1024 || num < -1024 )
     {
     char prefix = 0;			// try binary first, then si
-    for( int i = 0; i < 8 && num >= 1024 && num % 1024 == 0; ++i )
+    for( int i = 0; i < n && num != 0 && num % 1024 == 0; ++i )
       { num /= 1024; prefix = binary_prefix[i]; }
     if( prefix ) *(--p) = 'i';
     else
-      for( int i = 0; i < 8 && num >= 1000 && num % 1000 == 0; ++i )
+      for( int i = 0; i < n && num != 0 && num % 1000 == 0; ++i )
         { num /= 1000; prefix = si_prefix[i]; }
     if( prefix ) *(--p) = prefix;
     }
-  const bool split = num >= 100000;
+  const bool split = num >= 10000 || num <= -10000;
 
   for( int i = 0; ; )
     {
-    *(--p) = num % 10 + '0'; num /= 10; if( num == 0 ) break;
+    const long long onum = num; num /= 10;
+    *(--p) = llabs( onum - ( 10 * num ) ) + '0'; if( num == 0 ) break;
     if( split && ++i >= 3 ) { i = 0; *(--p) = '_'; }
     }
   if( negative ) *(--p) = '-';
@@ -67,10 +66,18 @@ const char * format_num3( long long num )
   }
 
 
-// Recognized formats: <num>[YZEPTGM][i][Bs], <num>k[Bs], <num>Ki[Bs]
-//
+void show_option_error( const char * const arg, const char * const msg,
+                        const char * const option_name )
+  {
+  if( verbosity >= 0 )
+    std::fprintf( stderr, "%s: '%s': %s option '%s'.\n",
+                  program_name, arg, msg, option_name );
+  }
+
+
+// Recognized formats: <num>k[Bs], <num>Ki[Bs], <num>[MGTPEZYRQ][i][Bs]
 long long getnum( const char * const arg, const char * const option_name,
-                  const int hardbs, const long long llimit = -LLONG_MAX,
+                  const int hardbs, const long long llimit = LLONG_MIN,
                   const long long ulimit = LLONG_MAX,
                   const char ** const tailp = 0 )
   {
@@ -78,12 +85,8 @@ long long getnum( const char * const arg, const char * const option_name,
   errno = 0;
   long long result = strtoll( arg, &tail, 0 );
   if( tail == arg )
-    {
-    if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Bad or missing numerical argument in "
-                    "option '%s'.\n", program_name, option_name );
-    std::exit( 1 );
-    }
+    { show_option_error( arg, "Bad or missing numerical argument in",
+                         option_name ); std::exit( 1 ); }
 
   if( !errno && tail[0] )
     {
@@ -93,6 +96,8 @@ long long getnum( const char * const arg, const char * const option_name,
     char usuf = 0;			// 'B' or 's' unit suffix is present
     switch( *p )
       {
+      case 'Q': exponent = 10; break;
+      case 'R': exponent = 9; break;
       case 'Y': exponent = 8; break;
       case 'Z': exponent = 7; break;
       case 'E': exponent = 6; break;
@@ -104,27 +109,25 @@ long long getnum( const char * const arg, const char * const option_name,
       case 'k': if( tail[0] != 'i' ) exponent = 1; break;
       case 'B':
       case 's': usuf = *p; exponent = 0; break;
-      default : if( tailp ) { tail = p; exponent = 0; }
+      default: if( tailp ) { tail = p; exponent = 0; }
       }
     if( exponent > 1 && tail[0] == 'i' ) { ++tail; factor = 1024; }
     if( exponent > 0 && usuf == 0 && ( tail[0] == 'B' || tail[0] == 's' ) )
       { usuf = tail[0]; ++tail; }
     if( exponent < 0 || ( usuf == 's' && hardbs <= 0 ) ||
         ( !tailp && tail[0] != 0 ) )
-      {
-      if( verbosity >= 0 )
-        std::fprintf( stderr, "%s: Bad multiplier in numerical argument of "
-                      "option '%s'.\n", program_name, option_name );
-      std::exit( 1 );
-      }
+      { show_option_error( arg, "Bad multiplier in numerical argument of",
+                           option_name ); std::exit( 1 ); }
     for( int i = 0; i < exponent; ++i )
       {
-      if( LLONG_MAX / factor >= llabs( result ) ) result *= factor;
+      if( ( result >= 0 && LLONG_MAX / factor >= result ) ||
+          ( result < 0 && LLONG_MIN / factor <= result ) ) result *= factor;
       else { errno = ERANGE; break; }
       }
     if( usuf == 's' )
       {
-      if( LLONG_MAX / hardbs >= llabs( result ) ) result *= hardbs;
+      if( ( result >= 0 && LLONG_MAX / hardbs >= result ) ||
+          ( result < 0 && LLONG_MIN / hardbs <= result ) ) result *= hardbs;
       else errno = ERANGE;
       }
     }
@@ -132,8 +135,8 @@ long long getnum( const char * const arg, const char * const option_name,
   if( errno )
     {
     if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Numerical argument out of limits [%s,%s] "
-                    "in option '%s'.\n", program_name, format_num3( llimit ),
+      std::fprintf( stderr, "%s: '%s': Value out of limits [%s,%s] in "
+                    "option '%s'.\n", program_name, arg, format_num3( llimit ),
                     format_num3( ulimit ), option_name );
     std::exit( 1 );
     }
@@ -148,16 +151,14 @@ long long getnum( const char * const arg, const char * const option_name,
 //
 void Bad_byte::parse_bb( const char * const arg, const char * const pn )
   {
+  argument = arg;
   option_name = pn;
   const char * tail;
   pos = getnum( arg, option_name, 0, 0, LLONG_MAX, &tail );
   if( tail[0] != ',' )
-    {
-    if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Bad separator between <pos> and <val> in "
-                    "argument of option '%s'.\n", program_name, option_name );
-    std::exit( 1 );
-    }
+    { show_option_error( arg, ( tail[0] == 0 ) ? "Missing <val> in" :
+                         "Missing comma between <pos> and <val> in",
+                         option_name ); std::exit( 1 ); }
   if( tail[1] == '+' ) { ++tail; mode = delta; }
   else if( tail[1] == 'f' ) { ++tail; mode = flip; }
   else mode = literal;

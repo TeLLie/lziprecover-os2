@@ -1,6 +1,6 @@
 /* Functions to compute MD5 message digest of memory blocks according to the
    definition of MD5 in RFC 1321 from April 1992.
-   Copyright (C) 2020-2022 Antonio Diaz Diaz.
+   Copyright (C) 2020-2024 Antonio Diaz Diaz.
 
    This library is free software. Redistribution and use in source and
    binary forms, with or without modification, are permitted provided
@@ -162,7 +162,7 @@ void MD5SUM::md5_update( const uint8_t * const buffer, const unsigned long len )
 
 
 // finish computation and return the digest
-void MD5SUM::md5_finish( uint8_t digest[16] )
+void MD5SUM::md5_finish( md5_type & digest )
   {
   uint8_t padding[64] = {
     0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -189,7 +189,7 @@ void MD5SUM::md5_finish( uint8_t digest[16] )
 
 
 void compute_md5( const uint8_t * const buffer, const unsigned long len,
-                  uint8_t digest[16] )
+                  md5_type & digest )
   {
   MD5SUM md5sum;
   if( len > 0 ) md5sum.md5_update( buffer, len );
@@ -198,9 +198,9 @@ void compute_md5( const uint8_t * const buffer, const unsigned long len,
 
 
 bool check_md5( const uint8_t * const buffer, const unsigned long len,
-                const uint8_t digest[16] )
+                const md5_type & digest )
   {
-  uint8_t new_digest[16];
+  md5_type new_digest;
   compute_md5( buffer, len, new_digest );
-  return ( std::memcmp( digest, new_digest, 16 ) == 0 );
+  return digest == new_digest;
   }

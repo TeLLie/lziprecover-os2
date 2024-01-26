@@ -1,6 +1,6 @@
 Requirements
 ------------
-You will need a C++98 compiler with suport for 'long long'.
+You will need a C++98 compiler with support for 'long long'.
 (gcc 3.3.6 or newer is recommended).
 I use gcc 6.1.0 and 3.3.6, but the code should compile with any standards
 compliant compiler.
@@ -25,8 +25,8 @@ Procedure
 or
 	lzip -cd lziprecover[version].tar.lz | tar -xf -
 
-This creates the directory ./lziprecover[version] containing the source from
-the main archive.
+This creates the directory ./lziprecover[version] containing the source code
+extracted from the archive.
 
 2. Change to lziprecover directory and run configure.
    (Try 'configure --help' for usage instructions).
@@ -44,8 +44,13 @@ the main archive.
 
 4. Optionally, type 'make check' to run the tests that come with lziprecover.
 
+   If you have clzip installed (instead of lzip), use:
+
+	make LZIP_NAME=clzip check
+
 5. Type 'make install' to install the program and any data files and
-   documentation.
+   documentation. You need root privileges to install into a prefix owned
+   by root.
 
    Or type 'make install-compress', which additionally compresses the
    info manual and the man page after installation.
@@ -54,10 +59,6 @@ the main archive.
    You can install only the program, the info manual, or the man page by
    typing 'make install-bin', 'make install-info', or 'make install-man'
    respectively.
-
-   Instead of 'make install', you can type 'make install-as-lzip' to
-   install the program and any data files and documentation, and link
-   the program to the name 'lzip'.
 
 
 Another way
@@ -69,15 +70,15 @@ object files and executables to go and run the 'configure' script.
 'configure' automatically checks for the source code in '.', in '..', and
 in the directory that 'configure' is in.
 
-'configure' recognizes the option '--srcdir=DIR' to control where to
-look for the sources. Usually 'configure' can determine that directory
+'configure' recognizes the option '--srcdir=DIR' to control where to look
+for the source code. Usually 'configure' can determine that directory
 automatically.
 
 After running 'configure', you can run 'make' and 'make install' as
 explained above.
 
 
-Copyright (C) 2009-2022 Antonio Diaz Diaz.
+Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
 This file is free documentation: you have unlimited permission to copy,
 distribute, and modify it.

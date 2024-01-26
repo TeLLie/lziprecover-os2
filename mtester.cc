@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -91,7 +91,7 @@ void LZ_mtester::flush_data()
   }
 
 
-bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
+bool LZ_mtester::check_trailer( FILE * const f, unsigned long long byte_pos )
   {
   const Lzip_trailer * const trailer = rdec.get_trailer();
   if( !trailer )
@@ -102,8 +102,6 @@ bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
         std::fputs( "Can't get trailer.\n", f ); }
     return false;
     }
-  const unsigned long long data_size = data_position();
-  const unsigned long long member_size = rdec.member_position();
   bool error = false;
 
   const unsigned td_crc = trailer->data_crc();
@@ -116,6 +114,7 @@ bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
         std::fprintf( f, "CRC mismatch; stored %08X, computed %08X\n",
                       td_crc, crc() ); }
     }
+  const unsigned long long data_size = data_position();
   const unsigned long long td_size = trailer->data_size();
   if( td_size != data_size )
     {
@@ -126,6 +125,7 @@ bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
         std::fprintf( f, "Data size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
                       td_size, td_size, data_size, data_size ); }
     }
+  const unsigned long member_size = rdec.member_position();
   const unsigned long long tm_size = trailer->member_size();
   if( tm_size != member_size )
     {
@@ -133,7 +133,7 @@ bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
     if( verbosity >= 0 && f )
       { if( byte_pos )
           { std::fprintf( f, "byte %llu\n", byte_pos ); byte_pos = 0; }
-        std::fprintf( f, "Member size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
+        std::fprintf( f, "Member size mismatch; stored %llu (0x%llX), computed %lu (0x%lX)\n",
                       tm_size, tm_size, member_size, member_size ); }
     }
   return !error;
@@ -143,7 +143,7 @@ bool LZ_mtester::verify_trailer( FILE * const f, unsigned long long byte_pos )
 /* Return value: 0 = OK, 1 = decoder error, 2 = unexpected EOF,
                  3 = trailer error, 4 = unknown marker found,
                  -1 = pos_limit reached. */
-int LZ_mtester::test_member( const unsigned long long mpos_limit,
+int LZ_mtester::test_member( const unsigned long mpos_limit,
                              const unsigned long long dpos_limit,
                              FILE * const f, const unsigned long long byte_pos )
   {
@@ -214,9 +214,7 @@ int LZ_mtester::test_member( const unsigned long long mpos_limit,
             rdec.normalize();
             flush_data();
             if( len == min_match_len )		// End Of Stream marker
-              {
-              if( verify_trailer( f, byte_pos ) ) return 0; else return 3;
-              }
+              { if( check_trailer( f, byte_pos ) ) return 0; else return 3; }
             if( verbosity >= 0 && f )
               {
               if( byte_pos ) std::fprintf( f, "byte %llu\n", byte_pos );
@@ -234,7 +232,7 @@ int LZ_mtester::test_member( const unsigned long long mpos_limit,
       }
     copy_block( rep0, len );
     }
-  if( outfd >= 0 ) flush_data();
+  if( outfd >= 0 ) flush_data();	// else no need to flush if error
   return 2;
   }
 
@@ -245,7 +243,7 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
                                      const bool show_packets )
   {
   rdec.load();
-  unsigned old_tmpos = member_position();	// truncated member_position
+  unsigned old_tmpos = member_position();	// truncated member position
   while( !rdec.finished() )
     {
     const unsigned long long dp = data_position() + dpos;
@@ -348,13 +346,11 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
               if( show_packets )
                 std::printf( "%6llu %6llu  member trailer\n",
                              mpos + member_position(), dpos + data_position() );
-              if( verify_trailer( show_packets ? stdout : 0 ) ) return 0;
+              if( check_trailer( show_packets ? stdout : 0 ) ) return 0;
               return 3;
               }
             if( len == min_match_len + 1 )	// Sync Flush marker
-              {
-              rdec.load(); continue;
-              }
+              { rdec.load(); continue; }
             return 4;
             }
           }

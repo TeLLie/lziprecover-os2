@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -37,13 +37,13 @@ const CRC32 crc32;
 /* Return the number of bytes really read.
    If (value returned < size) and (errno == 0), means EOF was reached.
 */
-long long readblock( const int fd, uint8_t * const buf, const long long size )
+long readblock( const int fd, uint8_t * const buf, const long size )
   {
-  long long sz = 0;
+  long sz = 0;
   errno = 0;
   while( sz < size )
     {
-    const int n = read( fd, buf + sz, std::min( 1LL << 20, size - sz ) );
+    const long n = read( fd, buf + sz, size - sz );
     if( n > 0 ) sz += n;
     else if( n == 0 ) break;				// EOF
     else if( errno != EINTR ) break;
@@ -56,14 +56,13 @@ long long readblock( const int fd, uint8_t * const buf, const long long size )
 /* Return the number of bytes really written.
    If (value returned < size), it is always an error.
 */
-long long writeblock( const int fd, const uint8_t * const buf,
-                      const long long size )
+long writeblock( const int fd, const uint8_t * const buf, const long size )
   {
-  long long sz = 0;
+  long sz = 0;
   errno = 0;
   while( sz < size )
     {
-    const int n = write( fd, buf + sz, std::min( 1LL << 20, size - sz ) );
+    const long n = write( fd, buf + sz, size - sz );
     if( n > 0 ) sz += n;
     else if( n < 0 && errno != EINTR ) break;
     errno = 0;
@@ -109,24 +108,21 @@ void LZ_decoder::flush_data()
   }
 
 
-bool LZ_decoder::verify_trailer( const Pretty_print & pp ) const
+int LZ_decoder::check_trailer( const Pretty_print & pp,
+                               const bool ignore_empty ) const
   {
   Lzip_trailer trailer;
-  int size = rdec.read_data( trailer.data, Lzip_trailer::size );
-  const unsigned long long data_size = data_position();
-  const unsigned long long member_size = rdec.member_position();
+  int size = rdec.read_data( trailer.data, trailer.size );
   bool error = false;
 
-  if( size < Lzip_trailer::size )
+  if( size < trailer.size )
     {
     error = true;
     if( verbosity >= 0 )
-      {
-      pp();
-      std::fprintf( stderr, "Trailer truncated at trailer position %d;"
-                            " some checks may fail.\n", size );
-      }
-    while( size < Lzip_trailer::size ) trailer.data[size++] = 0;
+      { pp();
+        std::fprintf( stderr, "Trailer truncated at trailer position %d;"
+                              " some checks may fail.\n", size ); }
+    while( size < trailer.size ) trailer.data[size++] = 0;
     }
 
   const unsigned td_crc = trailer.data_crc();
@@ -134,35 +130,32 @@ bool LZ_decoder::verify_trailer( const Pretty_print & pp ) const
     {
     error = true;
     if( verbosity >= 0 )
-      {
-      pp();
-      std::fprintf( stderr, "CRC mismatch; stored %08X, computed %08X\n",
-                    td_crc, crc() );
-      }
+      { pp();
+        std::fprintf( stderr, "CRC mismatch; stored %08X, computed %08X\n",
+                      td_crc, crc() ); }
     }
+  const unsigned long long data_size = data_position();
   const unsigned long long td_size = trailer.data_size();
   if( td_size != data_size )
     {
     error = true;
     if( verbosity >= 0 )
-      {
-      pp();
-      std::fprintf( stderr, "Data size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
-                    td_size, td_size, data_size, data_size );
-      }
+      { pp();
+        std::fprintf( stderr, "Data size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
+                      td_size, td_size, data_size, data_size ); }
     }
+  const unsigned long long member_size = rdec.member_position();
   const unsigned long long tm_size = trailer.member_size();
   if( tm_size != member_size )
     {
     error = true;
     if( verbosity >= 0 )
-      {
-      pp();
-      std::fprintf( stderr, "Member size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
-                    tm_size, tm_size, member_size, member_size );
-      }
+      { pp();
+        std::fprintf( stderr, "Member size mismatch; stored %llu (0x%llX), computed %llu (0x%llX)\n",
+                      tm_size, tm_size, member_size, member_size ); }
     }
-  if( error ) return false;
+  if( error ) return 3;
+  if( !ignore_empty && data_size == 0 ) return 5;
   if( verbosity >= 2 )
     {
     if( verbosity >= 4 ) show_header( dictionary_size );
@@ -182,13 +175,15 @@ bool LZ_decoder::verify_trailer( const Pretty_print & pp ) const
     pp();
     std::fprintf( stderr, "Range decoder final code is %08X\n", rdec.get_code() );
     }
-  return true;
+  return 0;
   }
 
 
 /* Return value: 0 = OK, 1 = decoder error, 2 = unexpected EOF,
-                 3 = trailer error, 4 = unknown marker found. */
-int LZ_decoder::decode_member( const Pretty_print & pp )
+                 3 = trailer error, 4 = unknown marker found,
+                 5 = empty member found, 6 = marked member found. */
+int LZ_decoder::decode_member( const Cl_options & cl_opts,
+                               const Pretty_print & pp )
   {
   Bit_model bm_literal[1<<literal_context_bits][0x300];
   Bit_model bm_match[State::states][pos_states];
@@ -208,7 +203,7 @@ int LZ_decoder::decode_member( const Pretty_print & pp )
   unsigned rep3 = 0;
   State state;
 
-  rdec.load();
+  if( !rdec.load( cl_opts.ignore_marking ) ) return 6;
   while( !rdec.finished() )
     {
     const int pos_state = data_position() & pos_state_mask;
@@ -272,13 +267,9 @@ int LZ_decoder::decode_member( const Pretty_print & pp )
             rdec.normalize();
             flush_data();
             if( len == min_match_len )		// End Of Stream marker
-              {
-              if( verify_trailer( pp ) ) return 0; else return 3;
-              }
+              return check_trailer( pp, cl_opts.ignore_empty );
             if( len == min_match_len + 1 )	// Sync Flush marker
-              {
-              rdec.load(); continue;
-              }
+              { rdec.load(); continue; }
             if( verbosity >= 0 )
               {
               pp();

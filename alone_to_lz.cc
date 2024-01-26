@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -36,13 +36,13 @@
 namespace {
 
 /* Return the address of a malloc'd buffer containing the file data and
-   the file size in '*size'. The buffer is at least 20 bytes larger.
-   In case of error, return 0 and do not modify '*size'.
+   the file size in '*file_sizep'. The buffer is at least 20 bytes larger.
+   In case of error, return 0 and do not modify '*file_sizep'.
 */
-uint8_t * read_file( const int infd, long * const size,
+uint8_t * read_file( const int infd, long * const file_sizep,
                      const char * const filename )
   {
-  long buffer_size = 1 << 20;
+  long buffer_size = 65536;
   uint8_t * buffer = (uint8_t *)std::malloc( buffer_size );
   if( !buffer ) throw std::bad_alloc();
 
@@ -50,8 +50,8 @@ uint8_t * read_file( const int infd, long * const size,
   while( file_size >= buffer_size - 20 && !errno )
     {
     if( buffer_size >= LONG_MAX )
-      { show_file_error( filename, "File is too large" ); std::free( buffer );
-        return 0; }
+      { show_file_error( filename, "Input file is larger than LONG_MAX." );
+        std::free( buffer ); return 0; }
     buffer_size = ( buffer_size <= LONG_MAX / 2 ) ? 2 * buffer_size : LONG_MAX;
     uint8_t * const tmp = (uint8_t *)std::realloc( buffer, buffer_size );
     if( !tmp ) { std::free( buffer ); throw std::bad_alloc(); }
@@ -61,10 +61,10 @@ uint8_t * read_file( const int infd, long * const size,
     }
   if( errno )
     {
-    show_file_error( filename, "Error reading file", errno );
+    show_file_error( filename, "Error reading input file", errno );
     std::free( buffer ); return 0;
     }
-  *size = file_size;
+  *file_sizep = file_size;
   return buffer;
   }
 
@@ -88,21 +88,20 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
   uint8_t * const buffer = read_file( infd, &file_size, pp.name() );
   if( !buffer ) return 1;
   if( file_size < lzma_header_size )
-    { show_file_error( pp.name(), "file is too short" );
+    { show_file_error( pp.name(), "Input file is too short." );
       std::free( buffer ); return 2; }
 
   if( buffer[0] != 93 )			// (45 * 2) + (9 * 0) + 3
     {
     const Lzip_header & header = *(const Lzip_header *)buffer;
-    if( header.verify_magic() && header.verify_version() &&
-        isvalid_ds( header.dictionary_size() ) )
-      show_file_error( pp.name(), "file is already in lzip format" );
+    if( header.check() )
+      show_file_error( pp.name(), "Input file is already in lzip format." );
     else
-      show_file_error( pp.name(), "file has non-default LZMA properties" );
+      show_file_error( pp.name(), "Input file has non-default LZMA properties." );
     std::free( buffer ); return 2;
     }
   for( int i = 5; i < 13; ++i ) if( buffer[i] != 0xFF )
-    { show_file_error( pp.name(), "file is non-streamed" );
+    { show_file_error( pp.name(), "Input file is non-streamed." );
       std::free( buffer ); return 2; }
 
   if( verbosity >= 1 ) pp();
@@ -115,6 +114,7 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
   header.set_magic();
   header.dictionary_size( dictionary_size );
   for( int i = 0; i < Lzip_trailer::size; ++i ) buffer[file_size++] = 0;
+  // compute and fill trailer
   {
   LZ_mtester mtester( buffer + offset, file_size - offset, dictionary_size );
   const int result = mtester.test_member();
@@ -130,11 +130,12 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
     header.dictionary_size( dictionary_size );
     }
   Lzip_trailer & trailer =
-    *(Lzip_trailer *)( buffer + file_size - Lzip_trailer::size );
+    *(Lzip_trailer *)( buffer + file_size - trailer.size );
   trailer.data_crc( mtester.crc() );
   trailer.data_size( mtester.data_position() );
   trailer.member_size( mtester.member_position() );
   }
+  // check converted member
   LZ_mtester mtester( buffer + offset, file_size - offset, dictionary_size );
   if( mtester.test_member() != 0 || !mtester.finished() )
     { pp( "conversion failed" ); std::free( buffer ); return 2; }

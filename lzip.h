@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -55,7 +55,7 @@ enum {
   dis_slot_bits = 6,
   start_dis_model = 4,
   end_dis_model = 14,
-  modeled_distances = 1 << (end_dis_model / 2),		// 128
+  modeled_distances = 1 << ( end_dis_model / 2 ),	// 128
   dis_align_bits = 4,
   dis_align_size = 1 << dis_align_bits,
 
@@ -179,23 +179,14 @@ public:
       c = data[(c^buffer[i])&0xFF] ^ ( c >> 8 );
     crc = c;
     }
-
-  uint32_t compute_crc( const uint8_t * const buffer,
-                        const long long size ) const
-    {
-    uint32_t crc = 0xFFFFFFFFU;
-    for( long long i = 0; i < size; ++i )
-      crc = data[(crc^buffer[i])&0xFF] ^ ( crc >> 8 );
-    return crc ^ 0xFFFFFFFFU;
-    }
   };
 
 extern const CRC32 crc32;
 
 
 inline bool isvalid_ds( const unsigned dictionary_size )
-  { return ( dictionary_size >= min_dictionary_size &&
-             dictionary_size <= max_dictionary_size ); }
+  { return dictionary_size >= min_dictionary_size &&
+           dictionary_size <= max_dictionary_size; }
 
 
 inline int real_bits( unsigned value )
@@ -210,35 +201,35 @@ const uint8_t lzip_magic[4] = { 0x4C, 0x5A, 0x49, 0x50 };	// "LZIP"
 
 struct Lzip_header
   {
-  uint8_t data[6];			// 0-3 magic bytes
+  enum { size = 6 };
+  uint8_t data[size];			// 0-3 magic bytes
 					//   4 version
 					//   5 coded dictionary size
-  enum { size = 6 };
 
   void set_magic() { std::memcpy( data, lzip_magic, 4 ); data[4] = 1; }
-  bool verify_magic() const
-    { return ( std::memcmp( data, lzip_magic, 4 ) == 0 ); }
+  bool check_magic() const { return std::memcmp( data, lzip_magic, 4 ) == 0; }
 
-  bool verify_prefix( const int sz ) const	// detect (truncated) header
+  bool check_prefix( const int sz ) const	// detect (truncated) header
     {
     for( int i = 0; i < sz && i < 4; ++i )
       if( data[i] != lzip_magic[i] ) return false;
-    return ( sz > 0 );
+    return sz > 0;
     }
-  bool verify_corrupt() const			// detect corrupt header
+
+  bool check_corrupt() const			// detect corrupt header
     {
     int matches = 0;
     for( int i = 0; i < 4; ++i )
       if( data[i] == lzip_magic[i] ) ++matches;
-    return ( matches > 1 && matches < 4 );
+    return matches > 1 && matches < 4;
     }
 
   uint8_t version() const { return data[4]; }
-  bool verify_version() const { return ( data[4] == 1 ); }
+  bool check_version() const { return data[4] == 1; }
 
   unsigned dictionary_size() const
     {
-    unsigned sz = ( 1 << ( data[5] & 0x1F ) );
+    unsigned sz = 1 << ( data[5] & 0x1F );
     if( sz > min_dictionary_size )
       sz -= ( sz / 16 ) * ( ( data[5] >> 5 ) & 7 );
     return sz;
@@ -254,23 +245,23 @@ struct Lzip_header
       const unsigned fraction = base_size / 16;
       for( unsigned i = 7; i >= 1; --i )
         if( base_size - ( i * fraction ) >= sz )
-          { data[5] |= ( i << 5 ); break; }
+          { data[5] |= i << 5; break; }
       }
     return true;
     }
 
-  bool verify( const bool ignore_bad_ds ) const
-    { return verify_magic() && verify_version() &&
+  bool check( const bool ignore_bad_ds = false ) const
+    { return check_magic() && check_version() &&
              ( ignore_bad_ds || isvalid_ds( dictionary_size() ) ); }
   };
 
 
 struct Lzip_trailer
   {
-  uint8_t data[20];	//  0-3  CRC32 of the uncompressed data
+  enum { size = 20 };
+  uint8_t data[size];	//  0-3  CRC32 of the uncompressed data
 			//  4-11 size of the uncompressed data
 			// 12-19 member size including header and trailer
-  enum { size = 20 };
 
   unsigned data_crc() const
     {
@@ -302,7 +293,7 @@ struct Lzip_trailer
   void member_size( unsigned long long sz )
     { for( int i = 12; i <= 19; ++i ) { data[i] = (uint8_t)sz; sz >>= 8; } }
 
-  bool verify_consistency() const	// check internal consistency
+  bool check_consistency() const	// check internal consistency
     {
     const unsigned crc = data_crc();
     const unsigned long long dsize = data_size();
@@ -318,13 +309,27 @@ struct Lzip_trailer
   };
 
 
+struct Cl_options		// command-line options
+  {
+  bool ignore_empty;
+  bool ignore_errors;
+  bool ignore_marking;
+  bool ignore_trailing;
+  bool loose_trailing;
+
+  Cl_options()
+    : ignore_empty( true ), ignore_errors( false ), ignore_marking( true ),
+      ignore_trailing( true ), loose_trailing( false ) {}
+  };
+
+
 #ifndef INT64_MAX
-#define INT64_MAX  0x7FFFFFFFFFFFFFFFLL
+#define INT64_MAX 0x7FFFFFFFFFFFFFFFLL
 #endif
 
 class Block
   {
-  long long pos_, size_;		// pos + size <= INT64_MAX
+  long long pos_, size_;	// pos >= 0, size >= 0, pos + size <= INT64_MAX
 
 public:
   Block( const long long p, const long long s ) : pos_( p ), size_( s ) {}
@@ -344,13 +349,12 @@ public:
   bool operator<( const Block & b ) const { return pos_ < b.pos_; }
 
   bool includes( const long long pos ) const
-    { return ( pos_ <= pos && end() > pos ); }
+    { return pos_ <= pos && end() > pos; }
   bool overlaps( const Block & b ) const
-    { return ( pos_ < b.end() && b.pos_ < end() ); }
+    { return pos_ < b.end() && b.pos_ < end(); }
   bool overlaps( const long long pos, const long long size ) const
-    { return ( pos_ < pos + size && pos < end() ); }
+    { return pos_ < pos + size && pos < end(); }
 
-  void shift( Block & b ) { ++size_; ++b.pos_; --b.size_; }
   Block split( const long long pos );
   };
 
@@ -358,12 +362,15 @@ public:
 struct Member_list	// members/gaps/tdata to be dumped/removed/stripped
   {
   bool damaged;
+  bool empty;
   bool tdata;
   bool in, rin;
   std::vector< Block > range_vector, rrange_vector;
 
-  Member_list() : damaged( false ), tdata( false ), in( true ), rin( true ) {}
-  void parse_ml( const char * p, const char * const option_name );
+  Member_list() : damaged( false ), empty( false ), tdata( false ),
+                  in( true ), rin( true ) {}
+  void parse_ml( const char * const arg, const char * const option_name,
+                 Cl_options & cl_opts );
 
   bool range() const { return range_vector.size() || rrange_vector.size(); }
 
@@ -394,7 +401,7 @@ struct Error
 
 inline unsigned long long positive_diff( const unsigned long long x,
                                          const unsigned long long y )
-  { return ( ( x > y ) ? x - y : 0 ); }
+  { return ( x > y ) ? x - y : 0; }
 
 inline void set_retval( int & retval, const int new_val )
   { if( retval < new_val ) retval = new_val; }
@@ -402,39 +409,59 @@ inline void set_retval( int & retval, const int new_val )
 const char * const bad_magic_msg = "Bad magic number (file not in lzip format).";
 const char * const bad_dict_msg = "Invalid dictionary size in member header.";
 const char * const corrupt_mm_msg = "Corrupt header in multimember file.";
+const char * const empty_msg = "Empty member not allowed.";
+const char * const marking_msg = "Marking data not allowed.";
 const char * const trailing_msg = "Trailing data not allowed.";
 
 // defined in alone_to_lz.cc
 int alone_to_lz( const int infd, const Pretty_print & pp );
 
+// defined in byte_repair.cc
+long seek_write( const int fd, const uint8_t * const buf, const long size,
+                 const long long pos );
+uint8_t * read_member( const int infd, const long long mpos,
+                       const long long msize, const char * const filename );
+int byte_repair( const std::string & input_filename,
+                 const std::string & default_output_filename,
+                 const Cl_options & cl_opts,
+                 const char terminator, const bool force );
+int debug_delay( const char * const input_filename,
+                 const Cl_options & cl_opts, Block range,
+                 const char terminator );
+int debug_byte_repair( const char * const input_filename,
+                       const Cl_options & cl_opts, const Bad_byte & bad_byte,
+                       const char terminator );
+int debug_decompress( const char * const input_filename,
+                      const Cl_options & cl_opts, const Bad_byte & bad_byte,
+                      const bool show_packets );
+
 // defined in decoder.cc
-long long readblock( const int fd, uint8_t * const buf, const long long size );
-long long writeblock( const int fd, const uint8_t * const buf,
-                      const long long size );
+long readblock( const int fd, uint8_t * const buf, const long size );
+long writeblock( const int fd, const uint8_t * const buf, const long size );
 
 // defined in dump_remove.cc
 int dump_members( const std::vector< std::string > & filenames,
                   const std::string & default_output_filename,
-                  const Member_list & member_list, const bool force,
-                  bool ignore_errors, bool ignore_trailing,
-                  const bool loose_trailing, const bool strip,
-                  const bool to_stdout );
+                  const Cl_options & cl_opts, const Member_list & member_list,
+                  const bool force, const bool strip, const bool to_stdout );
 int remove_members( const std::vector< std::string > & filenames,
-                    const Member_list & member_list, bool ignore_errors,
-                    bool ignore_trailing, const bool loose_trailing );
+                  const Cl_options & cl_opts, const Member_list & member_list );
+int clear_marking( const std::vector< std::string > & filenames,
+                   const Cl_options & cl_opts );
 
 // defined in list.cc
 int list_files( const std::vector< std::string > & filenames,
-                const bool ignore_errors,
-                const bool ignore_trailing, const bool loose_trailing );
+                const Cl_options & cl_opts );
 
 // defined in lzip_index.cc
 int seek_read( const int fd, uint8_t * const buf, const int size,
                const long long pos );
 
 // defined in lunzcrash.cc
-int lunzcrash_bit( const char * const input_filename );
-int lunzcrash_block( const char * const input_filename, const int sector_size );
+int lunzcrash_bit( const char * const input_filename,
+                   const Cl_options & cl_opts );
+int lunzcrash_block( const char * const input_filename,
+                     const Cl_options & cl_opts, const int sector_size );
 int md5sum_files( const std::vector< std::string > & filenames );
 
 // defined in main.cc
@@ -442,6 +469,7 @@ extern const char * const program_name;
 extern std::string output_filename;	// global vars for output file
 extern int outfd;
 struct stat;
+bool fits_in_size_t( const unsigned long long size );
 const char * bad_version( const unsigned version );
 const char * format_ds( const unsigned dictionary_size );
 void show_header( const unsigned dictionary_size );
@@ -450,12 +478,13 @@ int open_instream( const char * const name, struct stat * const in_statsp,
 int open_truncable_stream( const char * const name,
                            struct stat * const in_statsp );
 bool open_outstream( const bool force, const bool protect,
-                     const bool rw = false, const bool skipping = true );
-bool file_exists( const std::string & filename );
+                     const bool rw = false, const bool skipping = true,
+                     const bool to_file = false );
+bool output_file_exists();
 void cleanup_and_fail( const int retval );
 bool check_tty_out();
 void set_signal_handler();
-int close_outstream( const struct stat * const in_statsp );
+bool close_outstream( const struct stat * const in_statsp );
 std::string insert_fixed( std::string name );
 void show_2file_error( const char * const msg1, const char * const name1,
                        const char * const name2, const char * const msg2 );
@@ -472,52 +501,38 @@ int test_member_from_file( const int infd, const unsigned long long msize,
                            long long * const failure_posp = 0 );
 int merge_files( const std::vector< std::string > & filenames,
                  const std::string & default_output_filename,
-                 const char terminator, const bool force );
+                 const Cl_options & cl_opts, const char terminator,
+                 const bool force );
 
 // defined in nrep_stats.cc
 int print_nrep_stats( const std::vector< std::string > & filenames,
-                      const int repeated_byte, const bool ignore_errors,
-                      const bool ignore_trailing, const bool loose_trailing );
+                      const Cl_options & cl_opts, const int repeated_byte );
 
 // defined in range_dec.cc
 const char * format_num( unsigned long long num,
                          unsigned long long limit = -1ULL,
                          const int set_prefix = 0 );
-bool safe_seek( const int fd, const long long pos );
+bool safe_seek( const int fd, const long long pos,
+                const char * const filename );
 int range_decompress( const std::string & input_filename,
                       const std::string & default_output_filename,
-                      Block range, const bool force, const bool ignore_errors,
-                      const bool ignore_trailing, const bool loose_trailing,
-                      const bool to_stdout );
-
-// defined in repair.cc
-long long seek_write( const int fd, const uint8_t * const buf,
-                      const long long size, const long long pos );
-uint8_t * read_member( const int infd, const long long mpos,
-                       const long long msize );
-int repair_file( const std::string & input_filename,
-                 const std::string & default_output_filename,
-                 const char terminator, const bool force );
-int debug_delay( const std::string & input_filename, Block range,
-                 const char terminator );
-int debug_repair( const std::string & input_filename,
-                  const Bad_byte & bad_byte, const char terminator );
-int debug_decompress( const std::string & input_filename,
-                      const Bad_byte & bad_byte, const bool show_packets );
+                      const Cl_options & cl_opts, Block range,
+                      const bool force, const bool to_stdout );
 
 // defined in reproduce.cc
 int reproduce_file( const std::string & input_filename,
                     const std::string & default_output_filename,
                     const char * const lzip_name,
                     const char * const reference_filename,
-                    const int lzip_level, const char terminator,
-                    const bool force );
-int debug_reproduce_file( const std::string & input_filename,
+                    const Cl_options & cl_opts, const int lzip_level,
+                    const char terminator, const bool force );
+int debug_reproduce_file( const char * const input_filename,
                           const char * const lzip_name,
                           const char * const reference_filename,
-                          const Block & range, const int sector_size,
-                          const int lzip_level );
+                          const Cl_options & cl_opts, const Block & range,
+                          const int sector_size, const int lzip_level );
 
 // defined in split.cc
 int split_file( const std::string & input_filename,
-                const std::string & default_output_filename, const bool force );
+                const std::string & default_output_filename,
+                const Cl_options & cl_opts, const bool force );

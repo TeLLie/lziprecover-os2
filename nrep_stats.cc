@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -38,11 +38,11 @@
    file with the longest sequence.
 */
 int print_nrep_stats( const std::vector< std::string > & filenames,
-                      const int repeated_byte, const bool ignore_errors,
-                      const bool ignore_trailing, const bool loose_trailing )
+                      const Cl_options & cl_opts, const int repeated_byte )
   {
   std::vector< unsigned long > len_vector;
-  unsigned long long best_pos = 0, lzma_size = 0;
+  unsigned long long lzma_size = 0;		// total size of LZMA data
+  unsigned long best_pos = 0;
   int best_name = -1, retval = 0;
   const bool count_all = ( repeated_byte < 0 || repeated_byte >= 256 );
   bool stdin_used = false;
@@ -57,8 +57,8 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
       open_instream( input_filename, &in_stats, false, true );
     if( infd < 0 ) { set_retval( retval, 1 ); continue; }
 
-    const Lzip_index lzip_index( infd, ignore_trailing, loose_trailing,
-                                 ignore_errors, ignore_errors );
+    const Lzip_index lzip_index( infd, cl_opts, cl_opts.ignore_errors,
+                                 cl_opts.ignore_errors );
     if( lzip_index.retval() != 0 )
       {
       show_file_error( input_filename, lzip_index.error().c_str() );
@@ -67,6 +67,9 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
       continue;
       }
     const unsigned long long cdata_size = lzip_index.cdata_size();
+    if( !fits_in_size_t( cdata_size ) )		// mmap uses size_t
+      { show_file_error( input_filename, "Input file is too large for mmap." );
+        set_retval( retval, 1 ); close( infd ); continue; }
     const uint8_t * const buffer =
       (const uint8_t *)mmap( 0, cdata_size, PROT_READ, MAP_PRIVATE, infd, 0 );
     close( infd );
@@ -76,8 +79,8 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
     for( long j = 0; j < lzip_index.members(); ++j )
       {
       const Block & mb = lzip_index.mblock( j );
-      long long pos = mb.pos() + 7;		// skip header (+1 byte) and
-      const long long end = mb.end() - 20;	// trailer of each member
+      long pos = mb.pos() + 7;			// skip header (+1 byte) and
+      const long end = mb.end() - 20;		// trailer of each member
       lzma_size += end - pos;
       while( pos < end )
         {
@@ -97,6 +100,7 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
     munmap( (void *)buffer, cdata_size );
     }
 
+  if( verbosity < 0 ) return retval;
   if( count_all )
     std::fputs( "\nShowing repeated sequences of any byte value.\n", stdout );
   else
@@ -111,7 +115,7 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
                    len, len_vector[len], lzma_size / len_vector[len],
                    format_num( 1ULL << ( 8 * ( len - count_all ) ), -1ULL, -1 ) );
   if( best_name >= 0 )
-    std::printf( "Longest sequence found at position %llu of '%s'\n",
+    std::printf( "Longest sequence found at position %lu of '%s'\n",
                  best_pos, filenames[best_name].c_str() );
   return retval;
   }

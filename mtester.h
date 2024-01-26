@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -18,14 +18,14 @@
 class Range_mtester
   {
   const uint8_t * const buffer;		// input buffer
-  const long long buffer_size;
-  long long pos;			// current pos in buffer
+  const long buffer_size;
+  long pos;				// current pos in buffer
   uint32_t code;
   uint32_t range;
   bool at_stream_end;
 
 public:
-  Range_mtester( const uint8_t * const buf, const long long buf_size )
+  Range_mtester( const uint8_t * const buf, const long buf_size )
     :
     buffer( buf ),
     buffer_size( buf_size ),
@@ -36,7 +36,7 @@ public:
     {}
 
   bool finished() { return pos >= buffer_size; }
-  unsigned long long member_position() const { return pos; }
+  unsigned long member_position() const { return pos; }
 
   uint8_t get_byte()
     {
@@ -56,9 +56,9 @@ public:
   void load()
     {
     code = 0;
-    for( int i = 0; i < 5; ++i ) code = ( code << 8 ) | get_byte();
     range = 0xFFFFFFFFU;
-    code &= range;		// make sure that first byte is discarded
+    get_byte();			// discard first byte of the LZMA stream
+    for( int i = 0; i < 4; ++i ) code = ( code << 8 ) | get_byte();
     }
 
   void normalize()
@@ -83,7 +83,7 @@ public:
     return symbol;
     }
 
-  unsigned decode_bit( Bit_model & bm )
+  bool decode_bit( Bit_model & bm )
     {
     normalize();
     const uint32_t bound = ( range >> bit_model_total_bits ) * bm.probability;
@@ -275,7 +275,7 @@ class LZ_mtester
 
   void print_block( const int len );
   void flush_data();
-  bool verify_trailer( FILE * const f = 0, unsigned long long byte_pos = 0 );
+  bool check_trailer( FILE * const f = 0, unsigned long long byte_pos = 0 );
 
   uint8_t peek_prev() const
     { return buffer[((pos > 0) ? pos : dictionary_size)-1]; }
@@ -336,7 +336,7 @@ void set_max_marker( const unsigned new_size )
   { if( max_marker_size_ < new_size ) max_marker_size_ = new_size; }
 
 public:
-  LZ_mtester( const uint8_t * const ibuf, const long long ibuf_size,
+  LZ_mtester( const uint8_t * const ibuf, const long ibuf_size,
               const unsigned dict_size, const int ofd = -1,
               MD5SUM * const md5sum_ = 0 )
     :
@@ -367,7 +367,7 @@ public:
   unsigned crc() const { return crc_ ^ 0xFFFFFFFFU; }
   unsigned long long data_position() const { return partial_data_pos + pos; }
   bool finished() { return rdec.finished(); }
-  unsigned long long member_position() const { return rdec.member_position(); }
+  unsigned long member_position() const { return rdec.member_position(); }
   unsigned long long total_packets() const { return total_packets_; }
   unsigned long long max_distance_pos() const { return max_rep0_pos; }
   unsigned max_distance() const { return max_rep0 + 1; }
@@ -385,7 +385,7 @@ public:
   void duplicate_buffer( uint8_t * const buffer2 );
 
   // these two functions set max_rep0
-  int test_member( const unsigned long long mpos_limit = LLONG_MAX,
+  int test_member( const unsigned long mpos_limit = LONG_MAX,
                    const unsigned long long dpos_limit = LLONG_MAX,
                    FILE * const f = 0, const unsigned long long byte_pos = 0 );
   /* this function also sets max_rep0_pos, total_packets_, max_packet_size_,

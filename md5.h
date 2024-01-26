@@ -1,6 +1,6 @@
 /* Functions to compute MD5 message digest of memory blocks according to the
    definition of MD5 in RFC 1321 from April 1992.
-   Copyright (C) 2020-2022 Antonio Diaz Diaz.
+   Copyright (C) 2020-2024 Antonio Diaz Diaz.
 
    This library is free software. Redistribution and use in source and
    binary forms, with or without modification, are permitted provided
@@ -17,6 +17,18 @@
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 */
+
+struct md5_type
+  {
+  uint8_t data[16];		// 128-bit md5 digest
+
+  bool operator==( const md5_type & d ) const
+    { return ( std::memcmp( data, d.data, 16 ) == 0 ); }
+  bool operator!=( const md5_type & d ) const { return !( *this == d ); }
+//  const uint8_t & operator[]( const int i ) const { return data[i]; }
+  uint8_t & operator[]( const int i ) { return data[i]; }
+  };
+
 
 class MD5SUM
   {
@@ -39,11 +51,11 @@ public:
     }
 
   void md5_update( const uint8_t * const buffer, const unsigned long len );
-  void md5_finish( uint8_t digest[16] );
+  void md5_finish( md5_type & digest );
   };
 
 void compute_md5( const uint8_t * const buffer, const unsigned long len,
-                  uint8_t digest[16] );
+                  md5_type & digest );
 
 bool check_md5( const uint8_t * const buffer, const unsigned long len,
-                const uint8_t digest[16] );
+                const md5_type & digest );

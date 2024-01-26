@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -34,16 +34,17 @@
 
 namespace {
 
-void first_filename( const std::string & input_filename,
+bool first_filename( const std::string & input_filename,
                      const std::string & default_output_filename,
                      const int max_digits )
   {
-  output_filename = default_output_filename.empty() ?
-                    input_filename : default_output_filename;
+  const bool to_file = default_output_filename.size();
+  output_filename = to_file ? default_output_filename : input_filename;
   int b = output_filename.size();
   while( b > 0 && output_filename[b-1] != '/' ) --b;
   output_filename.insert( b, "rec1" );
   if( max_digits > 1 ) output_filename.insert( b + 3, max_digits - 1, '0' );
+  return to_file;
   }
 
 
@@ -68,46 +69,48 @@ bool next_filename( const int max_digits )
 
 
 int split_file( const std::string & input_filename,
-                const std::string & default_output_filename, const bool force )
+                const std::string & default_output_filename,
+                const Cl_options & cl_opts, const bool force )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;
-  const int infd =
-    open_instream( input_filename.c_str(), &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
-  Lzip_index lzip_index( infd, true, true, true, true );
+  Lzip_index lzip_index( infd, cl_opts, true, true );
   if( lzip_index.retval() != 0 )
     {
-    show_file_error( input_filename.c_str(), lzip_index.error().c_str() );
+    show_file_error( filename, lzip_index.error().c_str() );
     return lzip_index.retval();
     }
-  // verify last member
+  // check last member
   const Block b = lzip_index.mblock( lzip_index.members() - 1 );
   long long mpos = b.pos();
   long long msize = b.size();
   long long failure_pos = 0;
-  if( !safe_seek( infd, mpos ) ) return 1;
+  if( !safe_seek( infd, mpos, filename ) ) return 1;
   if( test_member_from_file( infd, msize, &failure_pos ) == 1 )
     {						// corrupt or fake trailer
     while( true )
       {
       mpos += failure_pos; msize -= failure_pos;
       if( msize < min_member_size ) break;		// trailing data
-      if( !safe_seek( infd, mpos ) ) return 1;
+      if( !safe_seek( infd, mpos, filename ) ) return 1;
       if( test_member_from_file( infd, msize, &failure_pos ) != 1 ) break;
       }
-    lzip_index = Lzip_index( infd, true, true, true, true, mpos );
+    lzip_index = Lzip_index( infd, cl_opts, true, true, mpos );
     if( lzip_index.retval() != 0 )
       {
-      show_file_error( input_filename.c_str(), lzip_index.error().c_str() );
+      show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval();
       }
     }
 
-  if( !safe_seek( infd, 0 ) ) return 1;
+  if( !safe_seek( infd, 0, filename ) ) return 1;
   int max_digits = 1;
   for( long i = lzip_index.blocks( true ); i >= 10; i /= 10 ) ++max_digits;
-  first_filename( input_filename, default_output_filename, max_digits );
+  bool to_file =			// if true, create intermediate dirs
+    first_filename( input_filename, default_output_filename, max_digits );
 
   long long stream_pos = 0;		// first pos not yet written to file
   set_signal_handler();
@@ -116,26 +119,23 @@ int split_file( const std::string & input_filename,
     const Block & mb = lzip_index.mblock( i );
     if( mb.pos() > stream_pos )					// gap
       {
-      if( !open_outstream( force, true, false, false ) ) return 1;
+      if( !open_outstream( force, true, false, false, to_file ) ) return 1;
       if( !copy_file( infd, outfd, mb.pos() - stream_pos ) ||
-          close_outstream( &in_stats ) != 0 )
-        cleanup_and_fail( 1 );
-      next_filename( max_digits );
+          !close_outstream( &in_stats ) ) cleanup_and_fail( 1 );
+      next_filename( max_digits ); to_file = false;
       }
-    if( !open_outstream( force, true, false, false ) ) return 1;  // member
+    if( !open_outstream( force, true, false, false, to_file ) ) return 1;  // member
     if( !copy_file( infd, outfd, mb.size() ) ||
-        close_outstream( &in_stats ) != 0 )
-      cleanup_and_fail( 1 );
-    next_filename( max_digits );
+        !close_outstream( &in_stats ) ) cleanup_and_fail( 1 );
+    next_filename( max_digits ); to_file = false;
     stream_pos = mb.end();
     }
   if( lzip_index.file_size() > stream_pos )		// trailing data
     {
-    if( !open_outstream( force, true, false, false ) ) return 1;
+    if( !open_outstream( force, true, false, false, to_file ) ) return 1;
     if( !copy_file( infd, outfd, lzip_index.file_size() - stream_pos ) ||
-        close_outstream( &in_stats ) != 0 )
-      cleanup_and_fail( 1 );
-    next_filename( max_digits );
+        !close_outstream( &in_stats ) ) cleanup_and_fail( 1 );
+    next_filename( max_digits ); to_file = false;
     }
   close( infd );
   return 0;

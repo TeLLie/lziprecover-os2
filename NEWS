@@ -1,28 +1,35 @@
-Changes in version 1.23:
+Changes in version 1.24:
 
-Decompression time has been reduced by 5-12% depending on the file.
+The option '--empty-error', which forces exit status 2 if any empty member
+is found, has been added.
 
-In case of error in a numerical argument to a command line option, lziprecover
-now shows the name of the option and the range of valid values.
+The option '--marking-error', which forces exit status 2 if the first LZMA
+byte is non-zero in any member, has been added.
 
-Options '--dump' and '--strip' now refuse to write compressed data to a
-terminal except when dumping trailing data with '--dump=tdata'.
+The option '--clear-marking', which sets to zero the first LZMA byte of each
+member, has been added.
 
-The option '-U, --unzcrash' now requires an argument: '1' to test 1-bit
-errors, or 'B<size>' to test zeroed blocks.
+The keyword 'empty' is now recognized in the argument of '--dump',
+'--remove', and '--strip'.
 
-The memory tester now allocates the dictionary once per member instead of
-doing it for each test. This makes '-U, --unzcrash' about two times faster
-on my machine on files with an uncompressed size larger than about 30 MB.
+The option '--repair' has been renamed to '--byte-repair'.
 
-'-W, --debug-decompress' now continues decompressing the members following
-the damaged member if it has been fully decompressed (just failed with a CRC
-mismatch).
+The option '--debug-repair' has been renamed to '--debug-byte-repair'.
 
-The tool unzcrash now uses execvp instead of popen to avoid invoking /bin/sh
-and run faster. It also prints byte or block position in messages.
+File diagnostics have been reformatted as 'PROGRAM: FILE: MESSAGE'.
 
-Several descriptions have been improved in manual, '--help', and man page.
+Diagnostics caused by invalid arguments to command-line options now show the
+argument and the name of the option.
 
-The texinfo category of the manual has been changed from 'Data Compression'
-to 'Compression' to match that of gzip. (Reported by Alfred M. Szmidt).
+The option '-o, --output' now preserves dates, permissions, and ownership of
+the file, when decompressing exactly one file.
+
+The option '-o, --output' now creates missing intermediate directories when
+writing to a file.
+
+The option '--no-verify' of unzcrash has been renamed to '--no-check'.
+
+The variable MAKEINFO has been added to configure and Makefile.in.
+
+The makefile target 'install-as-lzip' has been removed because '--reproduce'
+needs a lzip compressor (not just a decompressor) named 'lzip' by default.

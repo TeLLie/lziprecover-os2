@@ -1,6 +1,6 @@
 /* Unzcrash - Tests robustness of decompressors to corrupted data.
    Inspired by unzcrash.c from Julian Seward's bzip2.
-   Copyright (C) 2008-2022 Antonio Diaz Diaz.
+   Copyright (C) 2008-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,9 +17,9 @@
 */
 /*
    Exit status: 0 for a normal exit, 1 for environmental problems
-   (file not found, invalid flags, I/O errors, etc), 2 to indicate a
-   corrupt or invalid input file, 3 for an internal consistency error
-   (e.g., bug) which caused unzcrash to panic.
+   (file not found, invalid command-line options, I/O errors, etc), 2 to
+   indicate a corrupt or invalid input file, 3 for an internal consistency
+   error (e.g., bug) which caused unzcrash to panic.
 */
 
 #define _FILE_OFFSET_BITS 64
@@ -91,7 +91,7 @@ void show_help()
                "  -B, --block[=<size>][,<val>]  test blocks of given size [512,0]\n"
                "  -d, --delta=<n>               test one byte/block/truncation every n bytes\n"
                "  -e, --set-byte=<pos>,<val>    set byte at position <pos> to value <val>\n"
-               "  -n, --no-verify               skip initial verification of file.lz\n"
+               "  -n, --no-check                skip initial test of file.lz and zcmp\n"
                "  -p, --position=<bytes>        first byte position to test [default 0]\n"
                "  -q, --quiet                   suppress all messages\n"
                "  -s, --size=<bytes>            number of byte positions to test [all]\n"
@@ -101,10 +101,10 @@ void show_help()
                "Examples of <range>:  1  1,2,3  1-4  1,3-5,8  1-3,5-8\n"
                "A negative position is relative to the end of file.\n"
                "A negative size is relative to the rest of the file.\n"
-               "\nExit status: 0 for a normal exit, 1 for environmental problems (file\n"
-               "not found, invalid flags, I/O errors, etc), 2 to indicate a corrupt or\n"
-               "invalid input file, 3 for an internal consistency error (e.g., bug) which\n"
-               "caused unzcrash to panic.\n"
+               "\nExit status: 0 for a normal exit, 1 for environmental problems\n"
+               "(file not found, invalid command-line options, I/O errors, etc), 2 to\n"
+               "indicate a corrupt or invalid input file, 3 for an internal consistency\n"
+               "error (e.g., bug) which caused unzcrash to panic.\n"
                "\nReport bugs to lzip-bug@nongnu.org\n"
                "Lziprecover home page: http://www.nongnu.org/lzip/lziprecover.html\n" );
   }
@@ -125,58 +125,46 @@ void parse_block( const char * const arg, const char * const option_name,
   if( tail[0] == ',' )
     value = getnum( tail + 1, option_name, 0, 0, 255 );
   else if( tail[0] )
-    {
-    if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Bad separator between <size> and <value> in "
-                    "argument of option '%s'.\n", program_name, option_name );
-    std::exit( 1 );
-    }
+    { show_option_error( arg, "Missing comma between <size> and <value> in",
+                         option_name ); std::exit( 1 ); }
   }
 
 
 /* Return the address of a malloc'd buffer containing the file data and
-   the file size in '*size'.
-   In case of error, return 0 and do not modify '*size'.
+   the file size in '*file_sizep'.
+   In case of error, return 0 and do not modify '*file_sizep'.
 */
-uint8_t * read_file( const char * const name, long * const size )
+uint8_t * read_file( const char * const filename, long * const file_sizep )
   {
-  FILE * const f = std::fopen( name, "rb" );
+  FILE * const f = std::fopen( filename, "rb" );
   if( !f )
-    {
-    if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Can't open input file '%s': %s\n",
-                    program_name, name, std::strerror( errno ) );
-    return 0;
-    }
+    { show_file_error( filename, "Can't open input file", errno ); return 0; }
 
-  long buffer_size = 1 << 20;
+  long buffer_size = 65536;
   uint8_t * buffer = (uint8_t *)std::malloc( buffer_size );
   if( !buffer ) { show_error( mem_msg ); return 0; }
   long file_size = std::fread( buffer, 1, buffer_size, f );
-  while( file_size >= buffer_size )
+  while( file_size >= buffer_size || ( !std::ferror( f ) && !std::feof( f ) ) )
     {
-    if( buffer_size >= LONG_MAX )
+    if( file_size >= buffer_size )	// may be false because of EINTR
       {
-      if( verbosity >= 0 )
-        std::fprintf( stderr, "%s: Input file '%s' is too large.\n",
-                      program_name, name );
-      std::free( buffer ); return 0;
+      if( buffer_size >= LONG_MAX )
+        { show_file_error( filename, "Input file is larger than LONG_MAX." );
+          std::free( buffer ); return 0; }
+      buffer_size = ( buffer_size <= LONG_MAX / 2 ) ? 2 * buffer_size : LONG_MAX;
+      uint8_t * const tmp = (uint8_t *)std::realloc( buffer, buffer_size );
+      if( !tmp ) { show_error( mem_msg ); std::free( buffer ); return 0; }
+      buffer = tmp;
       }
-    buffer_size = ( buffer_size <= LONG_MAX / 2 ) ? 2 * buffer_size : LONG_MAX;
-    uint8_t * const tmp = (uint8_t *)std::realloc( buffer, buffer_size );
-    if( !tmp ) { show_error( mem_msg ); std::free( buffer ); return 0; }
-    buffer = tmp;
     file_size += std::fread( buffer + file_size, 1, buffer_size - file_size, f );
     }
   if( std::ferror( f ) || !std::feof( f ) )
     {
-    if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Error reading file '%s': %s\n",
-                    program_name, name, std::strerror( errno ) );
+    show_file_error( filename, "Error reading input file", errno );
     std::free( buffer ); return 0;
     }
   std::fclose( f );
-  *size = file_size;
+  *file_sizep = file_size;
   return buffer;
   }
 
@@ -194,8 +182,9 @@ public:
     { return ( i >= 1 && i <= 8 && data[i-1] ); }
 
   // Recognized formats: 1 1,2,3 1-4 1,3-5,8 1-3,5-8
-  bool parse_bs( const char * p )
+  void parse_bs( const char * const arg, const char * const option_name )
     {
+    const char * p = arg;
     for( int i = 0; i < 8; ++i ) data[i] = false;
     while( true )
       {
@@ -209,11 +198,11 @@ public:
         for( int c = ch1; c <= *p; ++c ) data[c-'1'] = true;
         ++p;
         }
-      if( *p == 0 ) return true;
+      if( *p == 0 ) return;
       if( *p == ',' ) ++p; else break;
       }
-    show_error( "Invalid value or range." );
-    return false;
+    show_option_error( arg, "Invalid bit position or range in", option_name );
+    std::exit( 1 );
     }
 
   // number of N-bit errors per byte (N=0 to 8): 1 8 28 56 70 56 28 8 1
@@ -327,9 +316,9 @@ bool word_split( const char * const command, std::vector< std::string > & args )
   }
 
 
-// return -1 if fatal error, 0 if OK, >0 if error
+// return -1 if fatal error, 0 if OK, > 0 if error
 int fork_and_feed( const uint8_t * const buffer, const long buffer_size,
-                   const char ** const argv, const bool verify = false )
+                   const char ** const argv, const bool check = false )
   {
   int fda[2];				// pipe to child
   if( pipe( fda ) < 0 )
@@ -342,7 +331,7 @@ int fork_and_feed( const uint8_t * const buffer, const long buffer_size,
     {
     if( close( fda[0] ) != 0 )
       { show_error( "Error closing unused pipe", errno ); return -1; }
-    if( writeblock( fda[1], buffer, buffer_size ) != buffer_size && verify )
+    if( writeblock( fda[1], buffer, buffer_size ) != buffer_size && check )
       { show_error( "Can't write to child process", errno ); return -1; }
     if( close( fda[1] ) != 0 )
       { show_error( "Error closing pipe", errno ); return -1; }
@@ -375,7 +364,7 @@ int main( const int argc, const char * const argv[] )
   long block_size = 512;
   Mode program_mode = m_byte;
   uint8_t block_value = 0;
-  bool verify = true;
+  bool check = true;
   if( argc > 0 ) invocation_name = argv[0];
 
   const Arg_parser::Option options[] =
@@ -385,6 +374,7 @@ int main( const int argc, const char * const argv[] )
     { 'B', "block",     Arg_parser::maybe },
     { 'd', "delta",     Arg_parser::yes },
     { 'e', "set-byte",  Arg_parser::yes },
+    { 'n', "no-check",  Arg_parser::no  },
     { 'n', "no-verify", Arg_parser::no  },
     { 'p', "position",  Arg_parser::yes },
     { 'q', "quiet",     Arg_parser::no  },
@@ -409,12 +399,12 @@ int main( const int argc, const char * const argv[] )
     switch( code )
       {
       case 'h': show_help(); return 0;
-      case 'b': if( !bits.parse_bs( arg ) ) return 1; program_mode = m_byte; break;
+      case 'b': bits.parse_bs( arg, pn ); program_mode = m_byte; break;
       case 'B': if( arg[0] ) parse_block( arg, pn, block_size, block_value );
                 program_mode = m_block; break;
       case 'd': delta = getnum( arg, pn, block_size, 1, INT_MAX ); break;
       case 'e': bad_byte.parse_bb( arg, pn ); break;
-      case 'n': verify = false; break;
+      case 'n': check = false; break;
       case 'p': pos = getnum( arg, pn, block_size, -LONG_MAX, LONG_MAX ); break;
       case 'q': verbosity = -1; break;
       case 's': max_size = getnum( arg, pn, block_size, -LONG_MAX, LONG_MAX ); break;
@@ -422,7 +412,7 @@ int main( const int argc, const char * const argv[] )
       case 'v': if( verbosity < 4 ) ++verbosity; break;
       case 'V': show_version(); return 0;
       case 'z': zcmp_program = arg; break;
-      default : internal_error( "uncaught option." );
+      default: internal_error( "uncaught option." );
       }
     } // end process options
 
@@ -438,7 +428,7 @@ int main( const int argc, const char * const argv[] )
   const char * const command = parser.argument( argind ).c_str();
   std::vector< std::string > command_args;
   if( !word_split( command, command_args ) )
-    { show_file_error( command, "Invalid command" ); return 1; }
+    { show_file_error( command, "Invalid command." ); return 1; }
   const char ** const command_argv = new const char *[command_args.size()+1];
   for( unsigned i = 0; i < command_args.size(); ++i )
     command_argv[i] = command_args[i].c_str();
@@ -456,7 +446,7 @@ int main( const int argc, const char * const argv[] )
     zcmp_command = zcmp_program;
     zcmp_command += " '"; zcmp_command += filename; zcmp_command += "' -";
     if( !word_split( zcmp_command.c_str(), zcmp_args ) )
-      { show_file_error( zcmp_command.c_str(), "Invalid zcmp command" );
+      { show_file_error( zcmp_command.c_str(), "Invalid zcmp command." );
         return 1; }
     zcmp_argv = new const char *[zcmp_args.size()+1];
     for( unsigned i = 0; i < zcmp_args.size(); ++i )
@@ -464,9 +454,9 @@ int main( const int argc, const char * const argv[] )
     zcmp_argv[zcmp_args.size()] = 0;
     }
 
-  // verify original file
+  // check original file
   if( verbosity >= 1 ) fprintf( stderr, "Testing file '%s'\n", filename );
-  if( verify )
+  if( check )
     {
     const int ret = fork_and_feed( buffer, file_size, command_argv, true );
     if( ret != 0 )
@@ -510,12 +500,8 @@ int main( const int argc, const char * const argv[] )
   if( max_size < 0 ) max_size += file_size - pos;
   const long end = ( ( max_size < file_size - pos ) ? pos + max_size : file_size );
   if( bad_byte.pos >= file_size )
-    {
-    if( verbosity >= 0 )
-      std::fprintf( stderr, "%s: Position is beyond end of file "
-                    "in option '%s'.\n", program_name, bad_byte.option_name );
-    return 1;
-    }
+    { show_option_error( bad_byte.argument, "Position is beyond end of file in",
+                         bad_byte.option_name ); return 1; }
   if( bad_byte.pos >= 0 )
     buffer[bad_byte.pos] = bad_byte( buffer[bad_byte.pos] );
   long positions = 0, decompressions = 0, successes = 0, failed_comparisons = 0;
@@ -625,17 +611,17 @@ int main( const int argc, const char * const argv[] )
 
   if( verbosity >= 0 )
     {
-    std::fprintf( stderr, "\n%8ld %ss tested\n%8ld total decompressions"
-                          "\n%8ld decompressions returned with zero status",
+    std::fprintf( stderr, "\n%9ld %ss tested\n%9ld total decompressions"
+                          "\n%9ld decompressions returned with zero status",
                   positions, mode_str[program_mode], decompressions, successes );
     if( successes > 0 )
       {
       if( zcmp_command.empty() )
-        std::fputs( "\n         comparisons disabled\n", stderr );
+        std::fputs( "\n          comparisons disabled\n", stderr );
       else if( failed_comparisons > 0 )
-        std::fprintf( stderr, ", of which\n%8ld comparisons failed\n",
+        std::fprintf( stderr, ", of which\n%9ld comparisons failed\n",
                       failed_comparisons );
-      else std::fputs( "\n         all comparisons passed\n", stderr );
+      else std::fputs( "\n          all comparisons passed\n", stderr );
       }
     else std::fputc( '\n', stderr );
     }

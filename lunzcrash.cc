@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -37,31 +37,31 @@
 
 namespace {
 
-bool verify_member( const uint8_t * const mbuffer, const long long msize,
-                    const unsigned dictionary_size, const char * const name,
-                    uint8_t digest[16] )
+bool check_member( const uint8_t * const mbuffer, const long msize,
+                   const unsigned dictionary_size, const char * const name,
+                   md5_type & digest )
   {
   MD5SUM md5sum;
   LZ_mtester mtester( mbuffer, msize, dictionary_size, -1, &md5sum );
   if( mtester.test_member() != 0 || !mtester.finished() )
-    { show_file_error( name, "Error verifying input file." ); return false; }
+    { show_file_error( name, "Error checking input file." ); return false; }
   md5sum.md5_finish( digest );
   return true;
   }
 
 
-bool compare_member( const uint8_t * const mbuffer, const long long msize,
+bool compare_member( const uint8_t * const mbuffer, const long msize,
                      const unsigned dictionary_size,
-                     const long long byte_pos, const uint8_t digest[16] )
+                     const long long byte_pos, const md5_type & digest )
   {
   MD5SUM md5sum;
   LZ_mtester mtester( mbuffer, msize, dictionary_size, -1, &md5sum );
   bool error = ( mtester.test_member() != 0 || !mtester.finished() );
   if( !error )
     {
-    uint8_t new_digest[16];
+    md5_type new_digest;
     md5sum.md5_finish( new_digest );
-    if( std::memcmp( digest, new_digest, 16 ) != 0 ) error = true;
+    if( digest != new_digest ) error = true;
     }
   if( error && verbosity >= 0 )
     std::printf( "byte %llu comparison failed\n", byte_pos );
@@ -75,14 +75,14 @@ int test_member_rest( const LZ_mtester & master, uint8_t * const buffer2,
   {
   LZ_mtester mtester( master );		// tester with external buffer
   mtester.duplicate_buffer( buffer2 );
-  int result = mtester.test_member( LLONG_MAX, LLONG_MAX, stdout, byte_pos );
+  int result = mtester.test_member( LONG_MAX, LLONG_MAX, stdout, byte_pos );
   if( result == 0 && !mtester.finished() ) result = -1;	// false negative
   if( result != 0 ) *failure_posp = mtester.member_position();
   return result;
   }
 
 
-long next_pct_pos( const Lzip_index & lzip_index, const int i, const int pct,
+long next_pct_pos( const Lzip_index & lzip_index, const long i, const int pct,
                    const int sector_size = 0 )
   {
   if( pct <= 0 ) return 0;
@@ -103,13 +103,14 @@ long next_pct_pos( const Lzip_index & lzip_index, const int i, const int pct,
 
 /* Test 1-bit errors in LZMA streams in file.
    Unless verbosity >= 1, print only the bytes with interesting results. */
-int lunzcrash_bit( const char * const input_filename )
+int lunzcrash_bit( const char * const input_filename,
+                   const Cl_options & cl_opts )
   {
   struct stat in_stats;				// not used
   const int infd = open_instream( input_filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
-  const Lzip_index lzip_index( infd, true, true );
+  const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
     { show_file_error( input_filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
@@ -122,12 +123,12 @@ int lunzcrash_bit( const char * const input_filename )
     {
     const long long mpos = lzip_index.mblock( i ).pos();
     const long long msize = lzip_index.mblock( i ).size();
-    const unsigned dictionary_size = lzip_index.dictionary_size( i );
-    uint8_t * const mbuffer = read_member( infd, mpos, msize );
+    uint8_t * const mbuffer = read_member( infd, mpos, msize, input_filename );
     if( !mbuffer ) return 1;
-    uint8_t md5_orig[16];
-    if( !verify_member( mbuffer, msize, dictionary_size, input_filename,
-                        md5_orig ) ) return 2;
+    const unsigned dictionary_size = lzip_index.dictionary_size( i );
+    md5_type md5_orig;
+    if( !check_member( mbuffer, msize, dictionary_size, input_filename,
+                       md5_orig ) ) return 2;
     long pct_pos = next_pct_pos( lzip_index, i, pct );
     long pos = Lzip_header::size + 1, printed = 0;	// last pos printed
     const long end = msize - 20;
@@ -212,7 +213,7 @@ int lunzcrash_bit( const char * const input_filename )
       if( failed_comparisons > 0 )
         std::printf( ", of which\n%9ld comparisons failed\n",
                      failed_comparisons );
-      else std::fputs( "\n         all comparisons passed\n", stdout );
+      else std::fputs( "\n          all comparisons passed\n", stdout );
       }
     else std::fputc( '\n', stdout );
     }
@@ -222,13 +223,14 @@ int lunzcrash_bit( const char * const input_filename )
 
 /* Test zeroed blocks of given size in LZMA streams in file.
    Unless verbosity >= 1, print only the bytes with interesting results. */
-int lunzcrash_block( const char * const input_filename, const int sector_size )
+int lunzcrash_block( const char * const input_filename,
+                     const Cl_options & cl_opts, const int sector_size )
   {
   struct stat in_stats;				// not used
   const int infd = open_instream( input_filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
-  const Lzip_index lzip_index( infd, true, true );
+  const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
     { show_file_error( input_filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
@@ -242,16 +244,17 @@ int lunzcrash_block( const char * const input_filename, const int sector_size )
     {
     const long long mpos = lzip_index.mblock( i ).pos();
     const long long msize = lzip_index.mblock( i ).size();
+    // skip members with LZMA stream smaller than sector_size
+    if( msize - Lzip_header::size - 1 - 20 <= sector_size ) continue;
+    uint8_t * const mbuffer = read_member( infd, mpos, msize, input_filename );
+    if( !mbuffer ) return 1;
+    const unsigned dictionary_size = lzip_index.dictionary_size( i );
+    md5_type md5_orig;
+    if( !check_member( mbuffer, msize, dictionary_size, input_filename,
+                       md5_orig ) ) return 2;
+    long pct_pos = next_pct_pos( lzip_index, i, pct, sector_size );
     long pos = Lzip_header::size + 1;
     const long end = msize - sector_size - 20;
-    if( end <= pos ) continue;		// sector_size larger than LZMA stream
-    const unsigned dictionary_size = lzip_index.dictionary_size( i );
-    uint8_t * const mbuffer = read_member( infd, mpos, msize );
-    if( !mbuffer ) return 1;
-    uint8_t md5_orig[16];
-    if( !verify_member( mbuffer, msize, dictionary_size, input_filename,
-                        md5_orig ) ) return 2;
-    long pct_pos = next_pct_pos( lzip_index, i, pct, sector_size );
     if( verbosity >= 0 )	// give a clue of the range being tested
       std::printf( "Testing blocks of size %u from pos %llu to %llu\n",
                    sector_size, mpos + pos, mpos + end - 1 );
@@ -324,7 +327,7 @@ int lunzcrash_block( const char * const input_filename, const int sector_size )
       if( failed_comparisons > 0 )
         std::printf( ", of which\n%9ld comparisons failed\n",
                      failed_comparisons );
-      else std::fputs( "\n         all comparisons passed\n", stdout );
+      else std::fputs( "\n          all comparisons passed\n", stdout );
       }
     else std::fputc( '\n', stdout );
     }
@@ -348,7 +351,8 @@ int md5sum_files( const std::vector< std::string > & filenames )
     if( infd < 0 ) { set_retval( retval, 1 ); continue; }
 
     enum { buffer_size = 16384 };
-    uint8_t buffer[buffer_size], md5_digest[16];
+    uint8_t buffer[buffer_size];
+    md5_type md5_digest;
     MD5SUM md5sum;
     while( true )
       {

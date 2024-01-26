@@ -7,16 +7,15 @@ INSTALL_DIR = $(INSTALL) -d -m 755
 SHELL = /bin/sh
 CAN_RUN_INSTALLINFO = $(SHELL) -c "install-info --version" > /dev/null 2>&1
 
-objs = arg_parser.o alone_to_lz.o lzip_index.o list.o dump_remove.o \
-       lunzcrash.o md5.o merge.o mtester.o nrep_stats.o range_dec.o \
-       repair.o reproduce.o split.o decoder.o main.o
+objs = arg_parser.o alone_to_lz.o lzip_index.o list.o byte_repair.o \
+       dump_remove.o lunzcrash.o md5.o merge.o mtester.o nrep_stats.o \
+       range_dec.o reproduce.o split.o decoder.o main.o
 unzobjs = arg_parser.o unzcrash.o
 
 
 .PHONY : all install install-bin install-info install-man \
          install-strip install-compress install-strip-compress \
          install-bin-strip install-info-compress install-man-compress \
-         install-as-lzip \
          uninstall uninstall-bin uninstall-info uninstall-man \
          doc info man check dist clean distclean
 
@@ -37,33 +36,35 @@ unzcrash.o : unzcrash.cc
 %.o : %.cc
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
 
-$(objs)       : Makefile
-lzip.h        : common.h
-alone_to_lz.o : lzip.h mtester.h
-arg_parser.o  : arg_parser.h
-decoder.o     : lzip.h decoder.h
-dump_remove.o : lzip.h lzip_index.h
-list.o        : lzip.h lzip_index.h
-lunzcrash.o   : lzip.h md5.h mtester.h lzip_index.h
-lzip_index.o  : lzip.h lzip_index.h
-main.o        : arg_parser.h lzip.h decoder.h main_common.cc
-md5.o         : md5.h
-merge.o       : lzip.h decoder.h lzip_index.h
-mtester.o     : lzip.h md5.h mtester.h
-nrep_stats.o  : lzip.h lzip_index.h
-range_dec.o   : lzip.h decoder.h lzip_index.h
-repair.o      : lzip.h mtester.h lzip_index.h
-reproduce.o   : lzip.h md5.h mtester.h lzip_index.h
-split.o       : lzip.h lzip_index.h
-unzcrash.o    : Makefile arg_parser.h main_common.cc
+# prevent 'make' from trying to remake source files
+$(VPATH)/configure $(VPATH)/Makefile.in $(VPATH)/doc/$(pkgname).texi : ;
+%.h %.cc : ;
 
+$(objs)       : Makefile
+alone_to_lz.o : lzip.h common.h mtester.h
+arg_parser.o  : arg_parser.h
+byte_repair.o : lzip.h common.h mtester.h lzip_index.h
+decoder.o     : lzip.h common.h decoder.h
+dump_remove.o : lzip.h common.h lzip_index.h
+list.o        : lzip.h common.h lzip_index.h
+lunzcrash.o   : lzip.h common.h md5.h mtester.h lzip_index.h
+lzip_index.o  : lzip.h common.h lzip_index.h
+main.o        : arg_parser.h lzip.h common.h decoder.h main_common.cc
+md5.o         : md5.h
+merge.o       : lzip.h common.h decoder.h lzip_index.h
+mtester.o     : lzip.h common.h md5.h mtester.h
+nrep_stats.o  : lzip.h common.h lzip_index.h
+range_dec.o   : lzip.h common.h decoder.h lzip_index.h
+reproduce.o   : lzip.h common.h md5.h mtester.h lzip_index.h
+split.o       : lzip.h common.h lzip_index.h
+unzcrash.o    : Makefile arg_parser.h common.h main_common.cc
 
 doc : info man
 
 info : $(VPATH)/doc/$(pkgname).info
 
 $(VPATH)/doc/$(pkgname).info : $(VPATH)/doc/$(pkgname).texi
-	cd $(VPATH)/doc && makeinfo $(pkgname).texi
+	cd $(VPATH)/doc && $(MAKEINFO) $(pkgname).texi
 
 man : $(VPATH)/doc/$(progname).1
 
@@ -107,10 +108,6 @@ install-man :
 install-man-compress : install-man
 	lzip -v -9 "$(DESTDIR)$(mandir)/man1/$(progname).1"
 
-install-as-lzip : install
-	-rm -f "$(DESTDIR)$(bindir)/lzip"
-	cd "$(DESTDIR)$(bindir)" && ln -s $(progname) lzip
-
 uninstall : uninstall-man uninstall-info uninstall-bin
 
 uninstall-bin :
@@ -146,11 +143,13 @@ dist : doc
 	  $(DISTNAME)/testsuite/test.txt \
 	  $(DISTNAME)/testsuite/test21723.txt \
 	  $(DISTNAME)/testsuite/test_bad[6-9].txt \
+	  $(DISTNAME)/testsuite/test_3m.txt.lz.md5 \
 	  $(DISTNAME)/testsuite/fox.lz \
 	  $(DISTNAME)/testsuite/fox_*.lz \
 	  $(DISTNAME)/testsuite/fox6.lz \
 	  $(DISTNAME)/testsuite/fox6_sc[1-6].lz \
 	  $(DISTNAME)/testsuite/fox6_bad[1-6].lz \
+	  $(DISTNAME)/testsuite/fox6_mark.lz \
 	  $(DISTNAME)/testsuite/numbers.lz \
 	  $(DISTNAME)/testsuite/numbersbt.lz \
 	  $(DISTNAME)/testsuite/test.txt.lz \

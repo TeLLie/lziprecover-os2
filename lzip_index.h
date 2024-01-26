@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -22,9 +22,11 @@ class Lzip_index
     Block dblock, mblock;		// data block, member block
     unsigned dictionary_size;
 
-    Member( const long long dp, const long long ds,
-            const long long mp, const long long ms, const unsigned dict_size )
-      : dblock( dp, ds ), mblock( mp, ms ), dictionary_size( dict_size ) {}
+    Member( const long long dpos, const long long dsize,
+            const long long mpos, const long long msize,
+            const unsigned dict_size )
+      : dblock( dpos, dsize ), mblock( mpos, msize ),
+        dictionary_size( dict_size ) {}
 
     bool operator==( const Member & m ) const { return ( mblock == m.mblock ); }
     bool operator!=( const Member & m ) const { return ( mblock != m.mblock ); }
@@ -38,23 +40,23 @@ class Lzip_index
   int retval_;
   unsigned dictionary_size_;	// largest dictionary size in the file
 
-  bool check_header_error( const Lzip_header & header,
-                           const bool ignore_bad_ds );
+  bool check_header( const Lzip_header & header, const bool ignore_bad_ds );
   void set_errno_error( const char * const msg );
   void set_num_error( const char * const msg, unsigned long long num );
-  bool read_header( const int fd, Lzip_header & header, const long long pos );
+  bool read_header( const int fd, Lzip_header & header, const long long pos,
+                    const bool ignore_marking = true );
   bool read_trailer( const int fd, Lzip_trailer & trailer,
                      const long long pos );
   bool skip_gap( const int fd, unsigned long long & pos,
-                 const bool ignore_trailing, const bool loose_trailing,
+                 const Cl_options & cl_opts,
                  const bool ignore_bad_ds, const bool ignore_gaps );
 
 public:
   Lzip_index()
     : error_( "No index" ), insize( 0 ), retval_( 2 ), dictionary_size_( 0 ) {}
-  Lzip_index( const int infd, const bool ignore_trailing,
-              const bool loose_trailing, const bool ignore_bad_ds = false,
-              const bool ignore_gaps = false, const long long max_pos = 0 );
+  Lzip_index( const int infd, const Cl_options & cl_opts,
+              const bool ignore_bad_ds = false, const bool ignore_gaps = false,
+              const long long max_pos = 0 );
   Lzip_index( const std::vector< int > & infd_vector, const long long fsize );
 
   long members() const { return member_vector.size(); }

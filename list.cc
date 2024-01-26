@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -48,8 +48,7 @@ void list_line( const unsigned long long uncomp_size,
 
 
 int list_files( const std::vector< std::string > & filenames,
-                const bool ignore_errors,
-                const bool ignore_trailing, const bool loose_trailing )
+                const Cl_options & cl_opts )
   {
   unsigned long long total_comp = 0, total_uncomp = 0;
   int files = 0, retval = 0;
@@ -67,8 +66,8 @@ int list_files( const std::vector< std::string > & filenames,
       open_instream( input_filename, &in_stats, false, true );
     if( infd < 0 ) { set_retval( retval, 1 ); continue; }
 
-    const Lzip_index lzip_index( infd, ignore_trailing, loose_trailing,
-                                 ignore_errors, ignore_errors );
+    const Lzip_index lzip_index( infd, cl_opts, cl_opts.ignore_errors,
+                                 cl_opts.ignore_errors );
     close( infd );
     if( lzip_index.retval() != 0 )
       {

@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -53,22 +53,22 @@ int fatal( const int retval )
   { if( fatal_retval == 0 ) fatal_retval = retval; return retval; }
 
 // Return the position of the damaged area in the member, or -1 if error.
-long long zeroed_sector_pos( const char * const input_filename,
-                        const uint8_t * const mbuffer, const long long msize,
-                        long long * const sizep, uint8_t * const valuep )
+long zeroed_sector_pos( const uint8_t * const mbuffer, const long msize,
+                        const char * const input_filename,
+                        long * const sizep, uint8_t * const valuep )
   {
   enum { minlen = 8 };		// min number of consecutive identical bytes
-  long long i = Lzip_header::size;
-  const long long end = msize - minlen;
-  long long begin = -1;
-  long long size = 0;
+  long i = Lzip_header::size;
+  const long end = msize - minlen;
+  long begin = -1;
+  long size = 0;
   uint8_t value = 0;
   while( i < end )	// leave i pointing to the first differing byte
     {
     const uint8_t byte = mbuffer[i++];
     if( mbuffer[i] == byte )
       {
-      const long long pos = i - 1;
+      const long pos = i - 1;
       ++i;
       while( i < msize && mbuffer[i] == byte ) ++i;
       if( i - pos >= minlen )
@@ -94,23 +94,22 @@ long long zeroed_sector_pos( const char * const input_filename,
 
 
 const LZ_mtester * prepare_master2( const uint8_t * const mbuffer,
-                                    const long long msize,
-                                    const long long begin,
+                                    const long msize, const long begin,
                                     const unsigned dictionary_size )
   {
-  long long pos_limit = std::max( begin - 16, (long long)Lzip_header::size );
+  long pos_limit = std::max( begin - 16, (long)Lzip_header::size );
   LZ_mtester * master = new LZ_mtester( mbuffer, msize, dictionary_size );
   if( master->test_member( pos_limit ) != -1 ||
-      master->member_position() > (unsigned long long)begin )
+      master->member_position() > (unsigned long)begin )
     { delete master; return 0; }
   // decompress as much data as possible without surpassing begin
   while( pos_limit < begin && master->test_member( pos_limit + 1 ) == -1 &&
-         master->member_position() <= (unsigned long long)begin )
+         master->member_position() <= (unsigned long)begin )
     ++pos_limit;
   delete master;
   master = new LZ_mtester( mbuffer, msize, dictionary_size );
   if( master->test_member( pos_limit ) == -1 &&
-      master->member_position() <= (unsigned long long)begin ) return master;
+      master->member_position() <= (unsigned long)begin ) return master;
   delete master;
   return 0;
   }
@@ -122,9 +121,8 @@ const LZ_mtester * prepare_master2( const uint8_t * const mbuffer,
    Choose the match nearest to the beginning of the file.
    As a fallback, locate the longest partial match at least 512 bytes long.
    Return the offset in file of the first undecoded byte, or -1 if no match. */
-long long match_file( const LZ_mtester & master, const uint8_t * const rbuf,
-                      const long long rsize,
-                      const char * const reference_filename )
+long match_file( const LZ_mtester & master, const uint8_t * const rbuf,
+                 const long rsize, const char * const reference_filename )
   {
   const uint8_t * prev_buffer;
   int dec_size, prev_size;
@@ -135,17 +133,17 @@ long long match_file( const LZ_mtester & master, const uint8_t * const rbuf,
         { std::printf( "'%s' can't match: not enough data in dictionary.\n",
                        reference_filename ); pending_newline = false; }
       return -1; }
-  long long offset = -1;	// offset in file of the first undecoded byte
+  long offset = -1;	// offset in file of the first undecoded byte
   bool multiple = false;
   const uint8_t last_byte = dec_buffer[dec_size-1];
-  for( long long i = rsize - 1; i >= 3; --i )	// match at least 4 bytes at bof
+  for( long i = rsize - 1; i >= 3; --i )	// match at least 4 bytes at bof
     if( rbuf[i] == last_byte )
       {
       // compare file with the two parts of the dictionary
-      int len = std::min( (long long)dec_size - 1, i );
+      int len = std::min( (long)dec_size - 1, i );
       if( std::memcmp( rbuf + i - len, dec_buffer + dec_size - 1 - len, len ) == 0 )
         {
-        int len2 = std::min( (long long)prev_size, i - len );
+        int len2 = std::min( (long)prev_size, i - len );
         if( len2 <= 0 || !prev_buffer ||
             std::memcmp( rbuf + i - len - len2,
                          prev_buffer + prev_size - len2, len2 ) == 0 )
@@ -159,24 +157,24 @@ long long match_file( const LZ_mtester & master, const uint8_t * const rbuf,
   if( offset >= 0 )
     {
     if( multiple && verbosity >= 1 )
-      { std::printf( "warning: %s: Multiple matches. Using match at offset %lld\n",
+      { std::printf( "warning: %s: Multiple matches. Using match at offset %ld\n",
                      reference_filename, offset ); std::fflush( stdout ); }
     if( !multiple && verbosity >= 2 )
-      { std::printf( "%s: Match found at offset %lld\n",
+      { std::printf( "%s: Match found at offset %ld\n",
                      reference_filename, offset ); std::fflush( stdout ); }
     return offset;
     }
   int maxlen = 0;		// choose longest match in reference file
-  for( long long i = rsize - 1; i >= 0; --i )
+  for( long i = rsize - 1; i >= 0; --i )
     if( rbuf[i] == last_byte )
       {
       // compare file with the two parts of the dictionary
-      const int size1 = std::min( (long long)dec_size, i + 1 );
+      const int size1 = std::min( (long)dec_size, i + 1 );
       int len = 1;
       while( len < size1 && rbuf[i-len] == dec_buffer[dec_size-len-1] ) ++len;
       if( len == size1 )
         {
-        int size2 = std::min( (long long)prev_size, i + 1 - size1 );
+        int size2 = std::min( (long)prev_size, i + 1 - size1 );
         while( len < size1 + size2 &&
                rbuf[i-len] == prev_buffer[prev_size+size1-len] ) ++len;
         }
@@ -185,7 +183,7 @@ long long match_file( const LZ_mtester & master, const uint8_t * const rbuf,
   if( maxlen >= 512 && offset >= 0 )
     {
     if( verbosity >= 1 )
-      { std::printf( "warning: %s: Partial match found at offset %lld, len %d."
+      { std::printf( "warning: %s: Partial match found at offset %ld, len %d."
                      " Reference data may be mixed with other data.\n",
                      reference_filename, offset, maxlen );
         std::fflush( stdout ); }
@@ -295,39 +293,34 @@ bool good_status( const pid_t pid, const char * const name, const bool finished 
 /* Feed to lzip through 'ofd' the data decompressed up to 'good_dsize'
    (master->data_position) followed by the reference data from byte at
    offset 'offset' of reference file, up to a total of 'dsize' bytes. */
-bool feed_data( uint8_t * const mbuffer, const long long msize,
+bool feed_data( uint8_t * const mbuffer, const long msize,
                 const long long dsize, const unsigned long long good_dsize,
-                const uint8_t * const rbuf, const long long rsize,
-                const long long offset, const unsigned dictionary_size,
+                const uint8_t * const rbuf, const long rsize,
+                const long offset, const unsigned dictionary_size,
                 const int ofd )
   {
   LZ_mtester mtester( mbuffer, msize, dictionary_size, ofd );
-  if( mtester.test_member( LLONG_MAX, good_dsize ) != -1 ||
+  if( mtester.test_member( LONG_MAX, good_dsize ) != -1 ||
       good_dsize != mtester.data_position() )
     { show_error( "Error decompressing prefix data for compressor." );
       return false; }
   // limit reference data to remaining decompressed data in member
-  const long long end =
-    std::min( (unsigned long long)rsize, dsize - good_dsize + offset );
-  for( long long i = offset; i < end; )
-    {
-    const int size = std::min( end - i, 65536LL );
-    if( writeblock( ofd, rbuf + i, size ) != size )
-      { show_error( "Error writing reference data to compressor", errno );
-        return false; }
-    i += size;
-    }
+  const long size =
+    std::min( (unsigned long long)rsize - offset, dsize - good_dsize );
+  if( writeblock( ofd, rbuf + offset, size ) != size )
+    { show_error( "Error writing reference data to compressor", errno );
+      return false; }
   return true;
   }
 
 
 /* Try to reproduce the zeroed sector.
    Return value: -1 = failure, 0 = success, > 0 = fatal error. */
-int try_reproduce( uint8_t * const mbuffer, const long long msize,
+int try_reproduce( uint8_t * const mbuffer, const long msize,
                    const long long dsize, const unsigned long long good_dsize,
-                   const long long begin, const long long end,
-                   const uint8_t * const rbuf, const long long rsize,
-                   const long long offset, const unsigned dictionary_size,
+                   const long begin, const long end,
+                   const uint8_t * const rbuf, const long rsize,
+                   const long offset, const unsigned dictionary_size,
                    const char ** const lzip_argv, MD5SUM * const md5sump,
                    const char terminator, const bool auto0 = false )
   {
@@ -365,12 +358,12 @@ int try_reproduce( uint8_t * const mbuffer, const long long msize,
     { show_fork_error( lzip_argv[0] ); return fatal( 1 ); }
 
   close( fda[0] ); close( fda[1] ); close( fda2[1] );
-  const long long xend = std::min( end + 4, msize );
+  const long xend = std::min( end + 4, msize );
   int retval = 0;				// -1 = mismatch
   bool first_post = true;
   bool same_ds = true;				// reproduced DS == header DS
   bool tail_mismatch = false;			// mismatch after end
-  for( long long i = 0; i < xend; )
+  for( long i = 0; i < xend; )
     {
     enum { buffer_size = 16384 };		// 65536 makes it slower
     uint8_t buffer[buffer_size];
@@ -378,7 +371,7 @@ int try_reproduce( uint8_t * const mbuffer, const long long msize,
       {
       if( first_post )
         { first_post = false; print_pending_newline( terminator ); }
-      std::printf( "  Reproducing position %lld %c", i, terminator );
+      std::printf( "  Reproducing position %ld %c", i, terminator );
       std::fflush( stdout ); pending_newline = true;
       }
     const int rd = readblock( fda2[0], buffer, buffer_size );
@@ -406,7 +399,7 @@ done:
   if( close( fda2[0] ) != 0 ) { show_close_error( "compressor" ); retval = 1; }
   if( !good_status( pid, "data feeder", false ) ||
       !good_status( pid2, lzip_argv[0], false ) ) retval = auto0 ? -1 : 1;
-  if( !retval )		// test whole member after reproduction
+  if( retval == 0 )		// test whole member after reproduction
     {
     if( md5sump ) md5sump->reset();
     LZ_mtester mtester( mbuffer, msize, dictionary_size, -1, md5sump );
@@ -429,20 +422,20 @@ done:
 
 
 // Return value: -1 = master failed, 0 = success, > 0 = failure
-int reproduce_member( uint8_t * const mbuffer, const long long msize,
+int reproduce_member( uint8_t * const mbuffer, const long msize,
                       const long long dsize, const char * const lzip_name,
                       const char * const reference_filename,
-                      const long long begin, const long long size,
+                      const long begin, const long size,
                       const int lzip_level, MD5SUM * const md5sump,
                       const char terminator )
   {
   struct stat st;
   const int rfd = open_instream( reference_filename, &st, false, true );
   if( rfd < 0 ) return fatal( 1 );
-  if( st.st_size > LLONG_MAX )
-    { show_file_error( reference_filename, "File too large." ); close( rfd );
-      return fatal( 2 ); }
-  const long long rsize = st.st_size;
+  if( !fits_in_size_t( st.st_size ) )		// mmap uses size_t
+    { show_file_error( reference_filename, "Reference file is too large for mmap." );
+      close( rfd ); return fatal( 1 ); }
+  const long rsize = st.st_size;
   const uint8_t * const rbuf =
     (const uint8_t *)mmap( 0, rsize, PROT_READ, MAP_PRIVATE, rfd, 0 );
   close( rfd );
@@ -457,12 +450,12 @@ int reproduce_member( uint8_t * const mbuffer, const long long msize,
   if( !master ) return -1;
   if( verbosity >= 2 )
     {
-    std::printf( "  (master mpos = %llu, dpos = %llu)\n",
+    std::printf( "  (master mpos = %lu, dpos = %llu)\n",
                  master->member_position(), master->data_position() );
     std::fflush( stdout );
     }
 
-  const long long offset = match_file( *master, rbuf, rsize, reference_filename );
+  const long offset = match_file( *master, rbuf, rsize, reference_filename );
   if( offset < 0 ) { delete master; return 2; }		// no match
   // Reference data from offset must be at least as large as zeroed sector
   // minus member trailer if trailer is inside the zeroed sector.
@@ -472,7 +465,7 @@ int reproduce_member( uint8_t * const mbuffer, const long long msize,
       delete master; return 2; }
 
   const unsigned long long good_dsize = master->data_position();
-  const long long end = begin + size;
+  const long end = begin + size;
   char level_str[8] = "-0";	// compression level or match length limit
   char dict_str[16];
   snprintf( dict_str, sizeof dict_str, "-s%u", dictionary_size );
@@ -526,22 +519,23 @@ int reproduce_file( const std::string & input_filename,
                     const std::string & default_output_filename,
                     const char * const lzip_name,
                     const char * const reference_filename,
-                    const int lzip_level, const char terminator,
-                    const bool force )
+                    const Cl_options & cl_opts, const int lzip_level,
+                    const char terminator, const bool force )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;
-  const int infd =
-    open_instream( input_filename.c_str(), &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
-  const Lzip_index lzip_index( infd, true, true, true );
+  const Lzip_index lzip_index( infd, cl_opts, true );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename.c_str(), lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
-  output_filename = default_output_filename.empty() ?
-                    insert_fixed( input_filename ) : default_output_filename;
-  if( !force && file_exists( output_filename ) ) return 1;
+  const bool to_file = default_output_filename.size();
+  output_filename =
+    to_file ? default_output_filename : insert_fixed( input_filename );
+  if( !force && output_file_exists() ) return 1;
   outfd = -1;
   int errors = 0;
   const long page_size = std::max( 1L, sysconf( _SC_PAGESIZE ) );
@@ -556,35 +550,37 @@ int reproduce_file( const std::string & input_filename,
                    i + 1, lzip_index.members(), terminator );
       std::fflush( stdout ); pending_newline = true;
       }
-    if( !safe_seek( infd, mpos ) ) return 1;
+    if( !safe_seek( infd, mpos, filename ) ) return 1;
     long long failure_pos = 0;
     if( test_member_from_file( infd, msize, &failure_pos ) == 0 )
       continue;				// member is not damaged
     print_pending_newline( terminator );
     if( ++errors > 1 ) break;	// only one member can be reproduced
     if( failure_pos < Lzip_header::size )		// End Of File
-      { show_file_error( input_filename.c_str(), "Unexpected end of file." );
-        return 2; }
+      { show_file_error( filename, "Unexpected end of file." ); return 2; }
+    if( !fits_in_size_t( msize + page_size ) )		// mmap uses size_t
+      { show_file_error( filename,
+          "Input file contains member too large for mmap." ); return 1; }
 
     // without mmap, 3 times more memory are required because of fork
     const long mpos_rem = mpos % page_size;
     uint8_t * const mbuffer_base = (uint8_t *)mmap( 0, msize + mpos_rem,
               PROT_READ | PROT_WRITE, MAP_PRIVATE, infd, mpos - mpos_rem );
     if( mbuffer_base == MAP_FAILED )
-      { show_file_error( input_filename.c_str(), "Can't mmap", errno ); return 1; }
+      { show_file_error( filename, "Can't mmap", errno ); return 1; }
     uint8_t * const mbuffer = mbuffer_base + mpos_rem;
-    long long size = 0;
+    long size = 0;
     uint8_t value = 0;
-    const long long begin = zeroed_sector_pos( input_filename.c_str(), mbuffer,
-                                               msize, &size, &value );
+    const long begin =
+      zeroed_sector_pos( mbuffer, msize, filename, &size, &value );
     if( begin < 0 ) return 2;
     if( failure_pos < begin )
-      { show_file_error( input_filename.c_str(),
-                         "Data error found before damaged area." ); return 2; }
+      { show_file_error( filename, "Data error found before damaged area." );
+        return 2; }
     if( verbosity >= 1 )
       {
       std::printf( "Reproducing bad area in member %ld of %ld\n"
-                   "  (begin = %lld, size = %lld, value = 0x%02X)\n",
+                   "  (begin = %ld, size = %ld, value = 0x%02X)\n",
                    i + 1, lzip_index.members(), begin, size, value );
       std::fflush( stdout );
       }
@@ -596,9 +592,9 @@ int reproduce_file( const std::string & input_filename,
       {
       if( outfd < 0 )			// first damaged member reproduced
         {
-        if( !safe_seek( infd, 0 ) ) return 1;
+        if( !safe_seek( infd, 0, filename ) ) return 1;
         set_signal_handler();
-        if( !open_outstream( true, true ) ) return 1;
+        if( !open_outstream( true, true, false, true, to_file ) ) return 1;
         if( !copy_file( infd, outfd ) )		// copy whole file
           cleanup_and_fail( 1 );
         }
@@ -613,18 +609,18 @@ int reproduce_file( const std::string & input_filename,
       {
       if( final_msg )
         { std::fputs( final_msg, stdout ); std::fflush( stdout ); }
-      show_file_error( input_filename.c_str(),
-                       "Unable to reproduce member." ); return ret;
+      show_file_error( filename, "Unable to reproduce member." ); return ret;
       }
     }
 
   if( outfd < 0 )
     {
     if( verbosity >= 1 )
-      std::fputs( "Input file has no errors. Recovery is not needed.\n", stdout );
+      std::printf( "Input file '%s' has no errors. Recovery is not needed.\n",
+                   filename );
     return 0;
     }
-  if( close_outstream( &in_stats ) != 0 ) return 1;
+  if( !close_outstream( &in_stats ) ) return 1;
   if( verbosity >= 0 )
     {
     if( errors > 1 )
@@ -639,30 +635,29 @@ int reproduce_file( const std::string & input_filename,
 
 /* Passes a 0 terminator to other functions to prevent intramember feedback.
    Exits only in case of fatal error. (reference file too large, etc). */
-int debug_reproduce_file( const std::string & input_filename,
+int debug_reproduce_file( const char * const input_filename,
                           const char * const lzip_name,
                           const char * const reference_filename,
-                          const Block & range, const int sector_size,
-                          const int lzip_level )
+                          const Cl_options & cl_opts, const Block & range,
+                          const int sector_size, const int lzip_level )
   {
   struct stat in_stats;				// not used
-  const int infd =
-    open_instream( input_filename.c_str(), &in_stats, false, true );
+  const int infd = open_instream( input_filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
-  const Lzip_index lzip_index( infd, true, true );
+  const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename.c_str(), lzip_index.error().c_str() );
+    { show_file_error( input_filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
   const long long cdata_size = lzip_index.cdata_size();
   if( range.pos() >= cdata_size )
-    { show_file_error( input_filename.c_str(),
-                       "Range is beyond end of last member." ); return 1; }
+    { show_file_error( input_filename, "Range is beyond end of last member." );
+      return 1; }
 
   const long page_size = std::max( 1L, sysconf( _SC_PAGESIZE ) );
   const long long positions_to_test =
-    ( ( std::min( range.end(), cdata_size ) - range.pos() ) +
+    ( ( std::min( range.size(), cdata_size - range.pos() ) ) +
       sector_size - 9 ) / sector_size;
   long positions = 0, successes = 0, failed_comparisons = 0;
   long alternative_reproductions = 0;
@@ -673,11 +668,14 @@ int debug_reproduce_file( const std::string & input_filename,
     const long long mpos = lzip_index.mblock( i ).pos();
     const long long msize = lzip_index.mblock( i ).size();
     if( !range.overlaps( mpos, msize ) ) continue;
+    if( !fits_in_size_t( msize + page_size ) )		// mmap uses size_t
+      { show_file_error( input_filename,
+          "Input file contains member too large for mmap." ); return 1; }
     const long long dsize = lzip_index.dblock( i ).size();
     const unsigned dictionary_size = lzip_index.dictionary_size( i );
 
     // md5sums of original not damaged member (compressed and decompressed)
-    uint8_t md5_digest_c[16], md5_digest_d[16];
+    md5_type md5_digest_c, md5_digest_d;
     bool md5_valid = false;
     const long long rm_end = std::min( range.end(), mpos + msize );
     for( long long sector_pos = std::max( range.pos(), mpos );
@@ -688,15 +686,14 @@ int debug_reproduce_file( const std::string & input_filename,
       uint8_t * const mbuffer_base = (uint8_t *)mmap( 0, msize + mpos_rem,
                 PROT_READ | PROT_WRITE, MAP_PRIVATE, infd, mpos - mpos_rem );
       if( mbuffer_base == MAP_FAILED )
-        { show_file_error( input_filename.c_str(), "Can't mmap", errno );
-          return 1; }
+        { show_file_error( input_filename, "Can't mmap", errno ); return 1; }
       uint8_t * const mbuffer = mbuffer_base + mpos_rem;
       if( !md5_valid )
         {
         if( verbosity >= 0 )	// give a clue of the range being tested
           { std::printf( "Reproducing:    %s\nReference file: %s\nTesting "
                          "sectors of size %llu at file positions %llu to %llu\n",
-                         input_filename.c_str(), reference_filename,
+                         input_filename, reference_filename,
                          std::min( (long long)sector_size, rm_end - sector_pos ),
                          sector_pos, rm_end - 1 ); std::fflush( stdout ); }
         md5_valid = true; compute_md5( mbuffer, msize, md5_digest_c );
@@ -715,13 +712,13 @@ int debug_reproduce_file( const std::string & input_filename,
         }
       ++positions;
       const int sector_sz =
-        std::min( rm_end - sector_pos, (long long)sector_size );
+        std::min( (long long)sector_size, rm_end - sector_pos );
       // set mbuffer[sector] to 0
       std::memset( mbuffer + ( sector_pos - mpos ), 0, sector_sz );
-      long long size = 0;
+      long size = 0;
       uint8_t value = 0;
-      const long long begin = zeroed_sector_pos( input_filename.c_str(), mbuffer,
-                                                 msize, &size, &value );
+      const long begin =
+        zeroed_sector_pos( mbuffer, msize, input_filename, &size, &value );
       if( begin < 0 ) return 2;
       MD5SUM md5sum;
       const int ret = reproduce_member( mbuffer, msize, dsize, lzip_name,
@@ -730,9 +727,9 @@ int debug_reproduce_file( const std::string & input_filename,
       if( ret == 0 )
         {
         ++successes;
-        uint8_t new_digest[16];
+        md5_type new_digest;
         md5sum.md5_finish( new_digest );
-        if( std::memcmp( md5_digest_d, new_digest, 16 ) != 0 )
+        if( md5_digest_d != new_digest )
           {
           ++failed_comparisons;
           if( verbosity >= 0 )
@@ -765,17 +762,17 @@ int debug_reproduce_file( const std::string & input_filename,
 done:
   if( verbosity >= 0 )
     {
-    std::printf( "\n%8ld sectors tested"
-                 "\n%8ld reproductions returned with zero status",
+    std::printf( "\n%9ld sectors tested"
+                 "\n%9ld reproductions returned with zero status",
                  positions, successes );
     if( successes > 0 )
       {
       if( failed_comparisons > 0 )
-        std::printf( ", of which\n%8ld comparisons failed\n",
+        std::printf( ", of which\n%9ld comparisons failed\n",
                      failed_comparisons );
-      else std::fputs( "\n         all comparisons passed\n", stdout );
+      else std::fputs( "\n          all comparisons passed\n", stdout );
       if( alternative_reproductions > 0 )
-        std::printf( "%8ld alternative reproductions found\n",
+        std::printf( "%9ld alternative reproductions found\n",
                      alternative_reproductions );
       }
     else std::fputc( '\n', stdout );

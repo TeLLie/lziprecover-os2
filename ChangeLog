@@ -1,3 +1,21 @@
+2024-01-20  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.24 released.
+	* New options '--empty-error', '--marking-error', '--clear-marking'.
+	* dump_remove.cc, main.cc: Accept 'empty' in --dump, --remove, --strip.
+	* main.cc: Rename '--repair' to '--byte-repair'.
+	  Rename '--debug-repair' to '--debug-byte-repair'.
+	  Reformat file diagnostics as 'PROGRAM: FILE: MESSAGE'.
+	  (show_option_error): New function showing argument and option name.
+	  (main): Make -o preserve date/mode/owner if 1 input file.
+	  (open_outstream): Create missing intermediate directories.
+	* lzip.h: Rename verify_* to check_*.
+	* repair.cc: Rename to byte_repair.cc.
+	* unzcrash.cc: Rename '--no-verify' to '--no-check'.
+	* configure, Makefile.in: New variable 'MAKEINFO'.
+	* Makefile.in: Remove target 'install-as-lzip'; -e needs a real lzip.
+	* testsuite: New test files test_3m.txt.lz.md5, fox6_mark.lz.
+
 2022-01-21  Antonio Diaz Diaz  <antonio@gnu.org>
 
 	* Version 1.23 released.
@@ -54,7 +72,7 @@
 	  some kinds of corrupt trailers and
 	  some fake trailers embedded in trailing data.
 	* split.cc: Use Lzip_index to split members, gaps and trailing data.
-	* split.cc: Verify last member before writing anything.
+	* split.cc: Check last member before writing anything.
 	* list.cc (list_files): With '-i', ignore format errors, show gaps.
 	* range_dec.cc: With '-i', ignore a truncated last member.
 	* main.cc (main): Check return value of close( infd ).
@@ -64,7 +82,7 @@
 	* lziprecover.texi: New chapter 'Tarlz'.
 	* configure: Accept appending to CXXFLAGS; 'CXXFLAGS+=OPTIONS'.
 	* INSTALL: Document use of CXXFLAGS+='-D __USE_MINGW_ANSI_STDIO'.
-	* New test files fox.lz, fox6_sc[1-6].lz.
+	* testsuite: New test files fox.lz, fox6_sc[1-6].lz.
 
 2018-02-12  Antonio Diaz Diaz  <antonio@gnu.org>
 
@@ -226,7 +244,7 @@
 	* unzcrash.cc: Test all 1-byte errors.
 
 
-Copyright (C) 2009-2022 Antonio Diaz Diaz.
+Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
 This file is a collection of facts, and thus it is not copyrightable,
 but just in case, you have unlimited permission to copy, distribute, and

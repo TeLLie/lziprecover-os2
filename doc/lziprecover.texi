@@ -6,8 +6,8 @@
 @finalout
 @c %**end of header
 
-@set UPDATED 21 January 2022
-@set VERSION 1.23
+@set UPDATED 20 January 2024
+@set VERSION 1.24
 
 @dircategory Compression
 @direntry
@@ -37,7 +37,7 @@ This manual is for Lziprecover (version @value{VERSION}, @value{UPDATED}).
 
 @menu
 * Introduction::            Purpose and features of lziprecover
-* Invoking lziprecover::    Command line interface
+* Invoking lziprecover::    Command-line interface
 * Data safety::             Protecting data from accidental loss
 * Repairing one byte::      Fixing bit flips and similar errors
 * Merging files::           Fixing several damaged copies
@@ -53,7 +53,7 @@ This manual is for Lziprecover (version @value{VERSION}, @value{UPDATED}).
 @end menu
 
 @sp 1
-Copyright @copyright{} 2009-2022 Antonio Diaz Diaz.
+Copyright @copyright{} 2009-2024 Antonio Diaz Diaz.
 
 This manual is free documentation: you have unlimited permission to copy,
 distribute, and modify it.
@@ -116,9 +116,9 @@ the beginning is a thing of the past.
 Compression may be good for long-term archiving. For compressible data,
 multiple compressed copies may provide redundancy in a more useful form and
 may have a better chance of surviving intact than one uncompressed copy
-using the same amount of storage space. This is specially true if the format
-provides recovery capabilities like those of lziprecover, which is able to
-find and combine the good parts of several damaged copies.
+using the same amount of storage space. This is especially true if the
+format provides recovery capabilities like those of lziprecover, which is
+able to find and combine the good parts of several damaged copies.
 
 Lziprecover is able to recover or decompress files produced by any of the
 compressors in the lzip family: lzip, plzip, minilzip/lzlib, clzip, and
@@ -135,7 +135,7 @@ data in all members of the file can be extracted with the following command
 at the end of each damaged member):
 
 @example
-lziprecover -cd -i file.lz > file
+lziprecover -cd --ignore-errors file.lz > file
 @end example
 
 When recovering data, lziprecover takes as arguments the names of the
@@ -169,7 +169,8 @@ When decompressing or testing, a hyphen @samp{-} used as a @var{file}
 argument means standard input. It can be mixed with other @var{files} and is
 read just once, the first time it appears in the command line. If no file
 names are specified, lziprecover decompresses from standard input to
-standard output.
+standard output. Remember to prepend @file{./} to any file name beginning
+with a hyphen, or use @samp{--}.
 
 lziprecover supports the following
 @uref{http://www.nongnu.org/arg-parser/manual/arg_parser_manual.html#Argument-syntax,,options}:
@@ -215,21 +216,21 @@ lzma-alone file as follows:
 @item -c
 @itemx --stdout
 Write decompressed data to standard output; keep input files unchanged. This
-option (or @samp{-o}) is needed when reading from a named pipe (fifo) or
+option (or @option{-o}) is needed when reading from a named pipe (fifo) or
 from a device. Use it also to recover as much of the decompressed data as
-possible when decompressing a corrupt file. @samp{-c} overrides @samp{-o}.
-@samp{-c} has no effect when merging, removing members, repairing,
+possible when decompressing a corrupt file. @option{-c} overrides @option{-o}.
+@option{-c} has no effect when merging, removing members, repairing,
 reproducing, splitting, testing or listing.
 
 @item -d
 @itemx --decompress
-Decompress the files specified. If a file does not exist, can't be opened,
-or the destination file already exists and @samp{--force} has not been
-specified, lziprecover continues decompressing the rest of the files and
-exits with error status 1. If a file fails to decompress, or is a terminal,
-lziprecover exits immediately with error status 2 without decompressing the
-rest of the files. A terminal is considered an uncompressed file, and
-therefore invalid.
+Decompress the files specified. The integrity of the files specified is
+checked. If a file does not exist, can't be opened, or the destination file
+already exists and @option{--force} has not been specified, lziprecover
+continues decompressing the rest of the files and exits with error status 1.
+If a file fails to decompress, or is a terminal, lziprecover exits
+immediately with error status 2 without decompressing the rest of the files.
+A terminal is considered an uncompressed file, and therefore invalid.
 
 @item -D @var{range}
 @itemx --range-decompress=@var{range}
@@ -238,7 +239,7 @@ Decompress only a range of bytes starting at decompressed byte position
 at 0. This option provides random access to the data in multimember files;
 it only decompresses the members containing the desired data. In order to
 guarantee the correctness of the data produced, all members containing any
-part of the desired data are decompressed and their integrity is verified.
+part of the desired data are decompressed and their integrity is checked.
 
 @anchor{range-format}
 Four formats of @var{range} are recognized, @samp{@var{begin}},
@@ -246,32 +247,32 @@ Four formats of @var{range} are recognized, @samp{@var{begin}},
 @samp{,@var{size}}. If only @var{begin} is specified, @var{end} is taken as
 the end of the file. If only @var{size} is specified, @var{begin} is taken
 as the beginning of the file. The bytes produced are sent to standard output
-unless the option @samp{--output} is used.
+unless the option @option{--output} is used.
 
 @anchor{--reproduce}
 @item -e
 @itemx --reproduce
 Try to recover a missing (zeroed) sector in @var{file} using a reference
 file and the same version of lzip that created @var{file}. If successful, a
-repaired copy is written to the file @samp{@var{file}_fixed.lz}. @var{file}
-is not modified at all. The exit status is 0 if the member containing the
-zeroed sector could be repaired, 2 otherwise. Note that
-@samp{@var{file}_fixed.lz} may still contain errors in the members following
-the one repaired. @xref{Reproducing one sector}, for a complete description
-of the reproduce mode.
+repaired copy is written to the file @var{file}_fixed.lz. @var{file} is not
+modified at all. The exit status is 0 if the member containing the zeroed
+sector could be repaired, 2 otherwise. Note that @var{file}_fixed.lz may
+still contain errors in the members following the one repaired.
+@xref{Reproducing one sector}, for a complete description of the reproduce
+mode.
 
 @item --lzip-level=@var{digit}|a|m[@var{length}]
 Try only the given compression level or match length limit when reproducing
-a zeroed sector. @samp{--lzip-level=a} tries all the compression levels
-@w{(0 to 9)}, while @samp{--lzip-level=m} tries all the match length limits
+a zeroed sector. @option{--lzip-level=a} tries all the compression levels
+@w{(0 to 9)}, while @option{--lzip-level=m} tries all the match length limits
 @w{(5 to 273)}.
 
 @item --lzip-name=@var{name}
-Set the name of the lzip executable used by @samp{--reproduce}. If
-@samp{--lzip-name} is not specified, @samp{lzip} is used.
+Set the name of the lzip executable used by @option{--reproduce}. If
+@option{--lzip-name} is not specified, @samp{lzip} is used.
 
 @item --reference-file=@var{file}
-Set the reference file used by @samp{--reproduce}. It must contain the
+Set the reference file used by @option{--reproduce}. It must contain the
 uncompressed data corresponding to the missing compressed data of the zeroed
 sector, plus some context data before and after them.
 
@@ -281,7 +282,7 @@ Force overwrite of output files.
 
 @item -i
 @itemx --ignore-errors
-Make @samp{--decompress}, @samp{--test}, and @samp{--range-decompress}
+Make @option{--decompress}, @option{--test}, and @option{--range-decompress}
 ignore format and data errors and continue decompressing the remaining
 members in the file; keep input files unchanged. For example, the commands
 @w{@samp{lziprecover -cd -i file.lz > file}} or
@@ -293,8 +294,8 @@ range decompressed may be smaller than the range requested, because of the
 errors. The exit status is set to 0 unless other errors are found (I/O
 errors, for example).
 
-Make @samp{--list}, @samp{--dump}, @samp{--remove}, and @samp{--strip}
-ignore format errors. The sizes of the members with errors (specially the
+Make @option{--list}, @option{--dump}, @option{--remove}, and @option{--strip}
+ignore format errors. The sizes of the members with errors (especially the
 last) may be wrong.
 
 @item -k
@@ -306,51 +307,51 @@ Keep (don't delete) input files during decompression.
 Print the uncompressed size, compressed size, and percentage saved of the
 files specified. Trailing data are ignored. The values produced are correct
 even for multimember files. If more than one file is given, a final line
-containing the cumulative sizes is printed. With @samp{-v}, the dictionary
+containing the cumulative sizes is printed. With @option{-v}, the dictionary
 size, the number of members in the file, and the amount of trailing data (if
-any) are also printed. With @samp{-vv}, the positions and sizes of each
-member in multimember files are also printed. With @samp{-i}, format errors
-are ignored, and with @samp{-ivv}, gaps between members are shown. The
-member numbers shown coincide with the file numbers produced by @samp{--split}.
+any) are also printed. With @option{-vv}, the positions and sizes of each
+member in multimember files are also printed. With @option{-i}, format errors
+are ignored, and with @option{-ivv}, gaps between members are shown. The
+member numbers shown coincide with the file numbers produced by @option{--split}.
 
 If any file is damaged, does not exist, can't be opened, or is not regular,
-the final exit status will be @w{> 0}. @samp{-lq} can be used to verify
-quickly (without decompressing) the structural integrity of the files
-specified. (Use @samp{--test} to verify the data integrity). @samp{-alq}
-additionally verifies that none of the files specified contain trailing data.
+the final exit status is @w{> 0}. @option{-lq} can be used to check quickly
+(without decompressing) the structural integrity of the files specified.
+(Use @option{--test} to check the data integrity). @option{-alq}
+additionally checks that none of the files specified contain trailing data.
 
 @item -m
 @itemx --merge
 Try to produce a correct file by merging the good parts of two or more
 damaged copies. If successful, a repaired copy is written to the file
-@samp{@var{file}_fixed.lz}. The exit status is 0 if a correct file could
-be produced, 2 otherwise. @xref{Merging files}, for a complete
-description of the merge mode.
+@var{file}_fixed.lz. The exit status is 0 if a correct file could be
+produced, 2 otherwise. @xref{Merging files}, for a complete description of
+the merge mode.
 
 @item -o @var{file}
 @itemx --output=@var{file}
-Place the output into @var{file} instead of into @samp{@var{file}_fixed.lz}.
-If splitting, the names of the files produced are in the form
-@samp{rec01@var{file}}, @samp{rec02@var{file}}, etc.
+Place the repaired output into @var{file} instead of into
+@var{file}_fixed.lz. If splitting, the names of the files produced are in
+the form @samp{rec01@var{file}}, @samp{rec02@var{file}}, etc.
 
-If decompressing, or converting lzma-alone files, and @samp{-c} has not been
-also specified, write the decompressed or converted output to @var{file};
-keep input files unchanged. This option (or @samp{-c}) is needed when
-reading from a named pipe (fifo) or from a device. @w{@samp{-o -}} is
-equivalent to @samp{-c}. @samp{-o} has no effect when testing or listing.
+If @option{-c} has not been also specified, write the (de)compressed output
+to @var{file}, automatically creating any missing parent directories; keep
+input files unchanged. This option (or @option{-c}) is needed when reading
+from a named pipe (fifo) or from a device. @w{@option{-o -}} is equivalent
+to @option{-c}. @option{-o} has no effect when testing or listing.
 
 @item -q
 @itemx --quiet
 Quiet operation. Suppress all messages.
 
-@anchor{--repair}
+@anchor{--byte-repair}
 @item -R
-@itemx --repair
+@itemx --byte-repair
 Try to repair a @var{file} with small errors (up to one single-byte error
 per member). If successful, a repaired copy is written to the file
-@samp{@var{file}_fixed.lz}. @var{file} is not modified at all. The exit
-status is 0 if the file could be repaired, 2 otherwise. @xref{Repairing one
-byte}, for a complete description of the repair mode.
+@var{file}_fixed.lz. @var{file} is not modified at all. The exit status is 0
+if the file could be repaired, 2 otherwise. @xref{Repairing one byte}, for a
+complete description of the repair mode.
 
 @item -s
 @itemx --split
@@ -375,11 +376,11 @@ depending on the number of members in @var{file}.
 @itemx --test
 Check integrity of the files specified, but don't decompress them. This
 really performs a trial decompression and throws away the result. Use it
-together with @samp{-v} to see information about the files. If a file
+together with @option{-v} to see information about the files. If a file
 fails the test, does not exist, can't be opened, or is a terminal, lziprecover
-continues checking the rest of the files. A final diagnostic is shown at
-verbosity level 1 or higher if any file fails the test when testing
-multiple files.
+continues testing the rest of the files. A final diagnostic is shown at
+verbosity level 1 or higher if any file fails the test when testing multiple
+files.
 
 @item -v
 @itemx --verbose
@@ -389,38 +390,33 @@ verbosity level, showing status, compression ratio, dictionary size,
 trailer contents (CRC, data size, member size), and up to 6 bytes of
 trailing data (if any) both in hexadecimal and as a string of printable
 ASCII characters.@*
-Two or more @samp{-v} options show the progress of decompression.@*
+Two or more @option{-v} options show the progress of decompression.@*
 In other modes, increasing verbosity levels show final status, progress
 of operations, and extra information (for example, the failed areas).
 
-@item --loose-trailing
-When decompressing, testing, or listing, allow trailing data whose first
-bytes are so similar to the magic bytes of a lzip header that they can
-be confused with a corrupt header. Use this option if a file triggers a
-"corrupt header" error and the cause is not indeed a corrupt header.
+@item --dump=[@var{member_list}][:damaged][:empty][:tdata]
+Dump the members listed, the damaged members (if any), the empty members (if
+any), or the trailing data (if any) of one or more regular multimember files
+to standard output, or to a file if the option @option{--output} is used. If
+more than one file is given, the elements dumped from all the files are
+concatenated. If a file does not exist, can't be opened, or is not regular,
+lziprecover continues processing the rest of the files. If the dump fails in
+one file, lziprecover exits immediately without processing the rest of the
+files. Only @option{--dump=tdata} can write to a terminal.
+@option{--dump=damaged} implies @option{--ignore-errors}.
 
-@item --dump=[@var{member_list}][:damaged][:tdata]
-Dump the members listed, the damaged members (if any), or the trailing
-data (if any) of one or more regular multimember files to standard
-output, or to a file if the option @samp{--output} is used. If more than
-one file is given, the elements dumped from all files are concatenated.
-If a file does not exist, can't be opened, or is not regular,
-lziprecover continues processing the rest of the files. If the dump
-fails in one file, lziprecover exits immediately without processing the
-rest of the files. Only @samp{--dump=tdata} can write to a terminal.
-
-The argument to @samp{--dump} is a colon-separated list of the following
-element specifiers; a member list (1,3-6), a reverse member list
-(r1,3-6), and the strings "damaged" and "tdata" (which may be shortened
-to 'd' and 't' respectively). A member list selects the members (or
-gaps) listed, whose numbers coincide with those shown by @samp{--list}.
-A reverse member list selects the members listed counting from the last
-member in the file (r1). Negated versions of both kinds of lists exist
-(^1,3-6:r^1,3-6) which selects all the members except those in the list.
-The strings "damaged" and "tdata" select the damaged members and the
-trailing data respectively. If the same member is selected more than
-once, for example by @samp{1:r1} in a single-member file, it is dumped
-just once. See the following examples:
+The argument to @option{--dump} is a colon-separated list of the following
+element specifiers; a member list (1,3-6), a reverse member list (r1,3-6),
+and the strings "damaged", "empty", and "tdata" (which may be shortened to
+'d', 'e', and 't' respectively). A member list selects the members (or gaps)
+listed, whose numbers coincide with those shown by @option{--list}. A reverse
+member list selects the members listed counting from the last member in the
+file (r1). Negated versions of both kinds of lists exist (^1,3-6:r^1,3-6)
+which select all the members except those in the list. The strings
+"damaged", "empty", and "tdata" select the damaged members, the empty
+members (those with a data size = 0), and the trailing data respectively. If
+the same member is selected more than once, for example by @samp{1:r1} in a
+single-member file, it is dumped just once. See the following examples:
 
 @multitable {@code{3,12:damaged:tdata}} {members 3, 12, damaged members, trailing data}
 @headitem @code{--dump} argument @tab Elements dumped
@@ -429,43 +425,70 @@ just once. See the following examples:
 @item @code{^13,15}              @tab all but 13th and 15th members in file
 @item @code{r^1}                 @tab all but last member in file
 @item @code{damaged}             @tab all damaged members in file
+@item @code{empty}               @tab all empty members in file
 @item @code{tdata}               @tab trailing data
 @item @code{1-5:r1:tdata}        @tab members 1 to 5, last member, trailing data
 @item @code{damaged:tdata}       @tab damaged members, trailing data
 @item @code{3,12:damaged:tdata}  @tab members 3, 12, damaged members, trailing data
 @end multitable
 
-@item --remove=[@var{member_list}][:damaged][:tdata]
-Remove the members listed, the damaged members (if any), or the trailing
-data (if any) from regular multimember files in place. The date of each
-file is preserved if possible. If all members in a file are selected to
-be removed, the file is left unchanged and the exit status is set to 2.
-If a file does not exist, can't be opened, is not regular, or is left
-unchanged, lziprecover continues processing the rest of the files. In case
-of I/O error, lziprecover exits immediately without processing the rest of
-the files. See @samp{--dump} above for a description of the argument.
+@item --remove=[@var{member_list}][:damaged][:empty][:tdata]
+Remove the members listed, the damaged members (if any), the empty members
+(if any), or the trailing data (if any) from regular multimember files in
+place. The date of each file modified is preserved if possible. If all
+members in a file are selected to be removed, the file is left unchanged and
+the exit status is set to 2. If a file does not exist, can't be opened, is
+not regular, or is left unchanged, lziprecover continues processing the rest
+of the files. In case of I/O error, lziprecover exits immediately without
+processing the rest of the files. See @option{--dump} above for a description
+of the argument.
 
-This option may be dangerous even if only the trailing data is being
-removed because the file may be corrupt or the trailing data may contain
-a forbidden combination of characters. @xref{Trailing data}. It is
-advisable to make a backup before attempting the removal. At least
-verify that @w{@samp{lzip -cd file.lz | wc -c}} and the uncompressed
-size shown by @w{@samp{lzip -l file.lz}} match before attempting the
-removal of trailing data.
+This option may be dangerous even if only the trailing data are being
+removed because the file may be corrupt or the trailing data may contain a
+forbidden combination of characters. @xref{Trailing data}. It is safer to
+send the output of @option{--strip} to a temporary file, check it, and then
+copy it over the original file. But if you prefer @option{--remove} because of
+its more efficient in-place removal, it is advisable to make a backup before
+attempting the removal. At least check that @w{@samp{lzip -cd file.lz | wc -c}}
+and the uncompressed size shown by @w{@samp{lzip -l file.lz}} match before
+attempting the removal of trailing data.
 
-@item --strip=[@var{member_list}][:damaged][:tdata]
-Copy one or more regular multimember files to standard output (or to a
-file if the option @samp{--output} is used), stripping the members
-listed, the damaged members (if any), or the trailing data (if any) from
-each file. If all members in a file are selected to be stripped, the
-trailing data (if any) are also stripped even if @samp{tdata} is not
-specified. If more than one file is given, the files are concatenated.
-In this case the trailing data are also stripped from all but the last
-file even if @samp{tdata} is not specified. If a file does not exist,
-can't be opened, or is not regular, lziprecover continues processing the
-rest of the files. If a file fails to copy, lziprecover exits
-immediately without processing the rest of the files. See @samp{--dump}
+@item --strip=[@var{member_list}][:damaged][:empty][:tdata]
+Copy one or more regular multimember files to standard output (or to a file
+if the option @option{--output} is used), stripping the members listed, the
+damaged members (if any), the empty members (if any), or the trailing data
+(if any) from each file. If all members in a file are selected to be
+stripped, the trailing data (if any) are also stripped even if @samp{tdata}
+is not specified. If more than one file is given, the files are
+concatenated. In this case the trailing data are also stripped from all but
+the last file even if @samp{tdata} is not specified. If a file does not
+exist, can't be opened, or is not regular, lziprecover continues processing
+the rest of the files. If a file fails to copy, lziprecover exits
+immediately without processing the rest of the files. See @option{--dump}
 above for a description of the argument.
+
+@item --empty-error
+Exit with error status 2 if any empty member is found in the input files.
+
+@item --marking-error
+Exit with error status 2 if the first LZMA byte is non-zero in any member of
+the input files. This may be caused by data corruption or by deliberate
+insertion of tracking information in the file. Use
+@w{@samp{lziprecover --clear-marking}} to clear any such non-zero bytes.
+
+@item --loose-trailing
+When decompressing, testing, or listing, allow trailing data whose first
+bytes are so similar to the magic bytes of a lzip header that they can
+be confused with a corrupt header. Use this option if a file triggers a
+"corrupt header" error and the cause is not indeed a corrupt header.
+
+@item --clear-marking
+Set to zero the first LZMA byte of each member in the files specified. At
+verbosity level 1 (-v), print the number of members cleared. The date of
+each file modified is preserved if possible. This option exists because the
+first byte of the LZMA stream is ignored by the range decoder, and can
+therefore be (mis)used to store any value which can then be used as a
+watermark to track the path of the compressed payload.
 
 @end table
 
@@ -486,8 +509,9 @@ nonzero status only in case of fatal error.
 @itemx --md5sum
 Print to standard output the MD5 digests of the input @var{files} one per
 line in the same format produced by the @command{md5sum} tool. Lziprecover
-uses MD5 digests to verify the result of some operations. This option allows
-the verification of lziprecover's implementation of the MD5 algorithm.
+uses MD5 digests to check the result of some operations. This option can be
+used to test the correctness of lziprecover's implementation of the MD5
+algorithm.
 
 @item -S[@var{value}]
 @itemx --nrep-stats[=@var{value}]
@@ -495,20 +519,21 @@ Compare the frequency of sequences of N repeated bytes of a given
 @var{value} in the compressed LZMA streams of the input @var{files} with the
 frequency expected for random data (1 / 2^(8N)). If @var{value} is not
 specified, print the frequency of repeated sequences of all possible byte
-values. Print cumulative data for all files followed by the name of the
+values. Print cumulative data for all the files, followed by the name of the
 first file with the longest sequence.
 
+@anchor{--unzcrash}
 @item -U 1|B@var{size}
 @itemx --unzcrash=1|B@var{size}
 With argument @samp{1}, test 1-bit errors in the LZMA stream of the
 compressed input @var{file} like the command
 @w{@samp{unzcrash -b1 -p7 -s-20 'lzip -t' @var{file}}} but in memory, and
-therefore much faster. @xref{Unzcrash}. This option tests all the members
-independently in a multimember file, skipping headers and trailers. If a
-decompression succeeds, the decompressed output is compared with the
-decompressed output of the original @var{file} using MD5 digests. @var{file}
-must not contain errors and must decompress correctly for the comparisons to
-work.
+therefore much faster (30 to 50 times faster). @xref{Unzcrash}. This option
+tests all the members independently in a multimember file, skipping headers
+and trailers. If a decompression succeeds, the decompressed output is
+compared with the decompressed output of the original @var{file} using MD5
+digests. @var{file} must not contain errors and must decompress correctly
+for the comparisons to work.
 
 With argument @samp{B}, test zeroed sectors (blocks of bytes) in the LZMA
 stream of the compressed input @var{file} like the command
@@ -516,7 +541,7 @@ stream of the compressed input @var{file} like the command
 but in memory, and therefore much faster. Testing and comparisons work just
 like with the argument @samp{1} explained above.
 
-By default @samp{--unzcrash} only prints the interesting cases; CRC
+By default @option{--unzcrash} only prints the interesting cases; CRC
 mismatches, size mismatches, unsupported marker codes, unexpected EOFs,
 apparently successful decompressions, and decoder errors detected 50_000 or
 more bytes beyond the byte (or the start of the block) being tested. At
@@ -529,8 +554,8 @@ block for zeroed blocks.
 @itemx --debug-decompress=@var{position},@var{value}
 Load the compressed @var{file} into memory, set the byte at @var{position}
 to @var{value}, and decompress the modified compressed data to standard
-output. If the damaged member is decompressed fully (just fails with a CRC
-mismatch), the members following it are also decompressed.
+output. If the damaged member can be decompressed to the end (just fails
+with a CRC mismatch), the members following it are also decompressed.
 
 @item -X[@var{position},@var{value}]
 @itemx --show-packets[=@var{position},@var{value}]
@@ -551,41 +576,44 @@ decoder realized that the data contains an error. @xref{range-format}, for a
 description of @var{range}.
 
 @item -Z @var{position},@var{value}
-@itemx --debug-repair=@var{position},@var{value}
+@itemx --debug-byte-repair=@var{position},@var{value}
 Load the compressed @var{file} into memory, set the byte at @var{position}
-to @var{value}, and then try to repair the error. @xref{--repair}.
+to @var{value}, and then try to repair the byte error. @xref{--byte-repair}.
 
 @end table
 
-Numbers given as arguments to options may be followed by a multiplier
-and an optional @samp{B} for "byte".
+Numbers given as arguments to options may be expressed in decimal,
+hexadecimal, or octal (using the same syntax as integer constants in C++),
+and may be followed by a multiplier and an optional @samp{B} for "byte".
 
 Table of SI and binary prefixes (unit multipliers):
 
-@multitable {Prefix} {kilobyte  (10^3 = 1000)} {|} {Prefix} {kibibyte (2^10 = 1024)}
+@multitable {Prefix} {kilobyte   (10^3 = 1000)} {|} {Prefix} {kibibyte  (2^10 = 1024)}
 @item Prefix @tab Value               @tab | @tab Prefix @tab Value
-@item k @tab kilobyte  (10^3 = 1000)  @tab | @tab Ki @tab kibibyte (2^10 = 1024)
-@item M @tab megabyte  (10^6)         @tab | @tab Mi @tab mebibyte (2^20)
-@item G @tab gigabyte  (10^9)         @tab | @tab Gi @tab gibibyte (2^30)
-@item T @tab terabyte  (10^12)        @tab | @tab Ti @tab tebibyte (2^40)
-@item P @tab petabyte  (10^15)        @tab | @tab Pi @tab pebibyte (2^50)
-@item E @tab exabyte   (10^18)        @tab | @tab Ei @tab exbibyte (2^60)
-@item Z @tab zettabyte (10^21)        @tab | @tab Zi @tab zebibyte (2^70)
-@item Y @tab yottabyte (10^24)        @tab | @tab Yi @tab yobibyte (2^80)
+@item k @tab kilobyte   (10^3 = 1000) @tab | @tab Ki @tab kibibyte  (2^10 = 1024)
+@item M @tab megabyte   (10^6)        @tab | @tab Mi @tab mebibyte  (2^20)
+@item G @tab gigabyte   (10^9)        @tab | @tab Gi @tab gibibyte  (2^30)
+@item T @tab terabyte   (10^12)       @tab | @tab Ti @tab tebibyte  (2^40)
+@item P @tab petabyte   (10^15)       @tab | @tab Pi @tab pebibyte  (2^50)
+@item E @tab exabyte    (10^18)       @tab | @tab Ei @tab exbibyte  (2^60)
+@item Z @tab zettabyte  (10^21)       @tab | @tab Zi @tab zebibyte  (2^70)
+@item Y @tab yottabyte  (10^24)       @tab | @tab Yi @tab yobibyte  (2^80)
+@item R @tab ronnabyte  (10^27)       @tab | @tab Ri @tab robibyte  (2^90)
+@item Q @tab quettabyte (10^30)       @tab | @tab Qi @tab quebibyte (2^100)
 @end multitable
 
 @sp 1
-Exit status: 0 for a normal exit, 1 for environmental problems (file not
-found, invalid flags, I/O errors, etc), 2 to indicate a corrupt or invalid
-input file, 3 for an internal consistency error (e.g., bug) which caused
-lziprecover to panic.
+Exit status: 0 for a normal exit, 1 for environmental problems
+(file not found, invalid command-line options, I/O errors, etc), 2 to
+indicate a corrupt or invalid input file, 3 for an internal consistency
+error (e.g., bug) which caused lziprecover to panic.
 
 
 @node Data safety
 @chapter Protecting data from accidental loss
 @cindex data safety
 
-It is a fact of life that sometimes data will become corrupt. Software has
+It is a fact of life that sometimes data becomes corrupt. Software has
 errors. Hardware may misbehave or fail. RAM may be struck by a cosmic ray.
 This is why a safe enough integrity checking is needed in compressed
 formats, and the reason why a data recovery tool is sometimes needed.
@@ -636,7 +664,7 @@ only be recovered by an expert, if at all.
 If you used bzip2, and if the file is large enough to contain more than one
 compressed data block (usually larger than @w{900 kB} uncompressed), and if
 no block is damaged in both files, then the data can be manually recovered
-by splitting the files with bzip2recover, verifying every block, and then
+by splitting the files with bzip2recover, checking every block, and then
 copying the right blocks in the right order into another file.
 
 But if you used lzip, the data can be automatically recovered with
@@ -659,12 +687,12 @@ unless some messages have been changed or deleted in the meantime. The new
 messages added to each backup are usually a small part of the whole mailbox.
 
 @verbatim
-+========================================================+
-|  Older backup containing some messages                 |
-+========================================================+
-+========================================================+================+
-|  Newer backup containing the messages above plus some  |  new messages  |
-+========================================================+================+
++============================================+
+| Older backup containing some messages      |
++============================================+
++============================================+========================+
+| Newer backup containing the messages above | plus some new messages |
++============================================+========================+
 @end verbatim
 
 One day you discover that your mailbox has disappeared because you deleted
@@ -687,7 +715,7 @@ combining the good blocks from both backups.
 But if you used lzip, the whole newer backup can be automatically recovered
 with @w{@samp{lziprecover --reproduce}} as long as the missing bytes can be
 recovered from the older backup, even if other messages in the common part
-have been changed or deleted. Mailboxes seem to be specially easy to
+have been changed or deleted. Mailboxes seem to be especially easy to
 reproduce. The probability of reproducing a mailbox
 (@pxref{performance-of-reproduce}) is almost as high as that of merging two
 identical backups (@pxref{performance-of-merge}).
@@ -698,10 +726,10 @@ identical backups (@pxref{performance-of-merge}).
 @cindex repairing one byte
 
 Lziprecover can repair perfectly most files with small errors (up to one
-single-byte error per member), without the need of any extra redundance
-at all. If the reparation is successful, the repaired file will be
-identical bit for bit to the original. This makes lzip files resistant
-to bit flip, one of the most common forms of data corruption.
+single-byte error per member), without the need of any extra redundance at
+all. If the reparation is successful, the repaired file is identical bit for
+bit to the original. This makes lzip files resistant to bit flip, one of the
+most common forms of data corruption.
 
 The file is repaired in memory. Therefore, enough virtual memory
 @w{(RAM + swap)} to contain the largest damaged member is required.
@@ -738,23 +766,22 @@ repairs more efficiently the worst errors.
 @cindex merging files
 
 If you have several copies of a file but all of them are too damaged to
-repair them (@pxref{Repairing one byte}), lziprecover can try to produce a
-correct file by merging the good parts of the damaged copies.
+repair them individually (@pxref{Repairing one byte}), lziprecover can try
+to produce a correct file by merging the good parts of the damaged copies.
 
-The merge may succeed even if some copies of the file have all the
-headers and trailers damaged, as long as there is at least one copy of
-every header and trailer intact, even if they are in different copies of
-the file.
+The merge may succeed even if some copies of the file have all the headers
+and trailers damaged, as long as there is at least one copy of every header
+and trailer intact, even if they are in different copies of the file.
 
-The merge will fail if the damaged areas overlap (at least one byte is
-damaged in all copies), or are adjacent and the boundary can't be
-determined, or if the copies have too many damaged areas.
+The merge fails if the damaged areas overlap (at least one byte is damaged
+in all copies), or are adjacent and the boundary can't be determined, or if
+the copies have too many damaged areas.
 
 All the copies to be merged must have the same size. If any of them is
-larger or smaller than it should, either because it has been truncated
-or because it got some garbage data appended at the end, it can be
-brought to the correct size with the following command before merging it
-with the other copies:
+larger or smaller than it should, either because it has been truncated or
+because it got some garbage data appended at the end, it can be brought to
+the correct size with the following command before merging it with the other
+copies:
 
 @example
 ddrescue -s<correct_size> -x<correct_size> file.lz correct_size_file.lz
@@ -852,7 +879,7 @@ feeding the concatenated data to the same version of lzip that created the
 file. For this to work, a reference file is required containing the
 uncompressed data corresponding to the missing compressed data of the zeroed
 sector, plus some context data before and after them. It is possible to
-recover a large file using just a few KB of reference data.
+recover a large file using just a few kB of reference data.
 
 The difficult part is finding a suitable reference file. It must contain the
 exact data required (possibly mixed with other data). Containing similar
@@ -886,9 +913,9 @@ Testing sectors of size 512 at file positions 65536 to 66047
 foo: Match found at offset 296892
 Reproduction succeeded at pos 65536
 
-       1 sectors tested
-       1 reproductions returned with zero status
-         all comparisons passed
+        1 sectors tested
+        1 reproductions returned with zero status
+          all comparisons passed
 @end example
 
 Using @samp{foo} as reference file guarantees that any zeroed sector in
@@ -923,8 +950,8 @@ overhead. It uses basic ustar headers, and only adds extended pax headers
 when they are required.
 
 @anchor{performance-of-reproduce}
-@section Performance of @samp{--reproduce}
-Reproduce mode is specially useful when recovering a corrupt backup (or a
+@section Performance of @option{--reproduce}
+Reproduce mode is especially useful when recovering a corrupt backup (or a
 corrupt source tarball) that is part of a series. Usually only a small
 fraction of the data changes from one backup to the next or from one version
 of a source tarball to the next. This makes sometimes possible to reproduce
@@ -957,10 +984,11 @@ real backups of my own working directory:
 @end multitable
 
 Note that the "performance of reproduce" is a probability, not a partial
-recovery. The data is either recovered fully (with the probability X shown
+recovery. The data are either recovered fully (with the probability X shown
 in the last column of the tables above) or not recovered at all (with
 probability @w{1 - X}).
 
+@noindent
 Example 1: Recover a damaged source tarball with a zeroed sector of 512
 bytes at file position 1019904, using as reference another source tarball
 for a different version of the software.
@@ -1052,7 +1080,7 @@ archiver and the
 
 Tarlz creates tar archives using a simplified and safer variant of the POSIX
 pax format compressed in lzip format, keeping the alignment between tar
-members and lzip members. The resulting multimember tar.lz archive is fully
+members and lzip members. The resulting multimember tar.lz archive is
 backward compatible with standard tar tools like GNU tar, which treat it
 like any other tar.lz archive.
 @ifnothtml
@@ -1136,11 +1164,11 @@ archive contains the end-of-file blocks.
 @chapter Names of the files produced by lziprecover
 @cindex file names
 
-The name of the fixed file produced by @samp{--merge} and @samp{--repair} is
-made by appending the string @samp{_fixed.lz} to the original file name. If
-the original file name ends with one of the extensions @samp{.tar.lz},
-@samp{.lz}, or @samp{.tlz}, the string @samp{_fixed} is inserted before the
-extension.
+The name of the fixed file produced by @option{--byte-repair} and
+@option{--merge} is made by appending the string @samp{_fixed.lz} to the
+original file name. If the original file name ends with one of the
+extensions @samp{.tar.lz}, @samp{.lz}, or @samp{.tlz}, the string
+@samp{_fixed} is inserted before the extension.
 
 
 @node File format
@@ -1171,7 +1199,7 @@ represents one byte; a box like this:
 represents a variable number of bytes.
 
 @sp 1
-A lzip file consists of a series of independent "members" (compressed data
+A lzip file consists of one or more independent "members" (compressed data
 sets). The members simply appear one after another in the file, with no
 additional information before, between, or after them. Each member can
 encode in compressed form up to @w{16 EiB - 1 byte} of uncompressed data.
@@ -1224,10 +1252,10 @@ Size of the original uncompressed data.
 
 @item Member size (8 bytes)
 Total size of the member, including header and trailer. This field acts
-as a distributed index, allows the verification of stream integrity, and
+as a distributed index, improves the checking of stream integrity, and
 facilitates the safe recovery of undamaged members from multimember files.
-Member size should be limited to @w{2 PiB} to prevent the data size field
-from overflowing.
+Lzip limits the member size to @w{2 PiB} to prevent the data size field from
+overflowing.
 
 @end table
 
@@ -1246,12 +1274,13 @@ example when writing to a tape. It is safe to append any amount of
 padding zero bytes to a lzip file.
 
 @item
-Useful data added by the user; a cryptographically secure hash, a
-description of file contents, etc. It is safe to append any amount of
-text to a lzip file as long as none of the first four bytes of the text
-match the corresponding byte in the string "LZIP", and the text does not
-contain any zero bytes (null characters). Nonzero bytes and zero bytes
-can't be safely mixed in trailing data.
+Useful data added by the user; an "End Of File" string (to check that the
+file has not been truncated), a cryptographically secure hash, a description
+of file contents, etc. It is safe to append any amount of text to a lzip
+file as long as none of the first four bytes of the text matches the
+corresponding byte in the string "LZIP", and the text does not contain any
+zero bytes (null characters). Nonzero bytes and zero bytes can't be safely
+mixed in trailing data.
 
 @item
 Garbage added by some not totally successful copy operation.
@@ -1269,8 +1298,8 @@ integrity information itself. Therefore it can be considered to be below
 the noise level. Additionally, the test used by lziprecover to discriminate
 trailing data from a corrupt header has a Hamming distance (HD) of 3,
 and the 3 bit flips must happen in different magic bytes for the test to
-fail. In any case, the option @samp{--trailing-error} guarantees that
-any corrupt header will be detected.
+fail. In any case, the option @option{--trailing-error} guarantees that
+any corrupt header is detected.
 @end itemize
 
 Trailing data are in no way part of the lzip file format, but tools
@@ -1280,7 +1309,7 @@ possible in the presence of trailing data.
 Trailing data can be safely ignored in most cases. In some cases, like
 that of user-added data, they are expected to be ignored. In those cases
 where a file containing trailing data must be rejected, the option
-@samp{--trailing-error} can be used. @xref{--trailing-error}.
+@option{--trailing-error} can be used. @xref{--trailing-error}.
 
 Lziprecover facilitates the management of metadata stored as trailing
 data in lzip files. See the following examples:
@@ -1301,7 +1330,7 @@ lziprecover --remove=tdata file.lz
 
 @sp 1
 @noindent
-Example 2: Add and verify a cryptographically secure hash. (This may be
+Example 2: Add and check a cryptographically secure hash. (This may be
 convenient, but a separate copy of the hash must be kept in a safe place
 to guarantee that both file and hash have not been maliciously replaced).
 
@@ -1335,7 +1364,7 @@ lziprecover -d file.lz
 
 @sp 1
 @noindent
-Example 3: Verify the integrity of the compressed file @samp{file.lz} and
+Example 3: Check the integrity of the compressed file @samp{file.lz} and
 show status.
 
 @example
@@ -1356,7 +1385,7 @@ Do this instead
 You may also concatenate the compressed files like this
   lziprecover --strip=tdata file1.lz file2.lz file3.lz > file123.lz
 Or keeping the trailing data of the last file like this
-  lziprecover --strip=damaged file1.lz file2.lz file3.lz > file123.lz
+  lziprecover --strip=empty file1.lz file2.lz file3.lz > file123.lz
 @end example
 
 @sp 1
@@ -1379,7 +1408,7 @@ lziprecover -D 10000-15000 file.lz
 
 @sp 1
 @noindent
-Example 7: Repair small errors in the file @samp{file.lz}. (Indented lines
+Example 7: Repair a corrupt byte in the file @samp{file.lz}. (Indented lines
 are abridged diagnostic messages from lziprecover).
 
 @example
@@ -1406,6 +1435,8 @@ lziprecover -tv rec*file.lz
 @chapter Testing the robustness of decompressors
 @cindex unzcrash
 
+@xref{--unzcrash}, for a faster way of testing the robustness of lzip.
+
 The lziprecover package also includes unzcrash, a program written to test
 robustness to decompression of corrupted data, inspired by unzcrash.c from
 Julian Seward's bzip2. Type @samp{make unzcrash} in the lziprecover source
@@ -1416,11 +1447,11 @@ decompresses it, increasing 256 times each byte of the compressed data, so
 as to test all possible one-byte errors. Note that it may take years or even
 centuries to test all possible one-byte errors in a large file (tens of MB).
 
-If the option @samp{--block} is given, unzcrash reads the file specified and
+If the option @option{--block} is given, unzcrash reads the file specified and
 then repeatedly decompresses it, setting all bytes in each successive block
 to the value given, so as to test all possible full sector errors.
 
-If the option @samp{--truncate} is given, unzcrash reads the file specified
+If the option @option{--truncate} is given, unzcrash reads the file specified
 and then repeatedly decompresses it, truncating the file to increasing
 lengths, so as to test all possible truncation points.
 
@@ -1433,7 +1464,7 @@ first non-option argument, and then writes the file specified in the second
 non-option argument to the standard input of the subprocess, modifying the
 corresponding byte each time. Therefore unzcrash can be used to test any
 decompressor (not only lzip), or even other decoder programs having a
-suitable command line syntax.
+suitable command-line syntax.
 
 If the decompressor returns with zero status, unzcrash compares the output
 of the decompressor for the original and corrupt files. If the outputs
@@ -1447,9 +1478,8 @@ In order to compare the outputs, unzcrash needs a @samp{zcmp} program able
 to understand the format being tested. For example the @samp{zcmp} provided
 by @uref{http://www.nongnu.org/zutils/manual/zutils_manual.html#Zcmp,,zutils}.
 If the @samp{zcmp} program used does not understand the format being tested,
-all the comparisons will fail because the compressed files will be compared
-without being decompressed first. Use @samp{--zcmp=false} to disable
-comparisons.
+all the comparisons fail because the compressed files are compared without
+being decompressed first. Use @option{--zcmp=false} to disable comparisons.
 @ifnothtml
 @xref{Zcmp,,,zutils}.
 @end ifnothtml
@@ -1499,14 +1529,14 @@ The number of N-bit errors per byte (N = 1 to 8) is:
 Test block errors of given @var{size}, simulating a whole sector I/O error.
 @var{size} defaults to 512 bytes. @var{value} defaults to 0. By default,
 only contiguous, non-overlapping blocks are tested, but this may be changed
-with the option @samp{--delta}.
+with the option @option{--delta}.
 
 @item -d @var{n}
 @itemx --delta=@var{n}
 Test one byte, block, or truncation size every @var{n} bytes. If
-@samp{--delta} is not specified, unzcrash tests all the bytes,
+@option{--delta} is not specified, unzcrash tests all the bytes,
 non-overlapping blocks, or truncation sizes. Values of @var{n} smaller than
-the block size will result in overlapping blocks. (Which is convenient for
+the block size result in overlapping blocks. (Which is convenient for
 testing because there are usually too few non-overlapping blocks in a file).
 
 @item -e @var{position},@var{value}
@@ -1520,9 +1550,9 @@ value of the byte at @var{position}. This option can be used to run tests
 with a changed dictionary size, for example.
 
 @item -n
-@itemx --no-verify
-Skip initial verification of @var{file} and @samp{zcmp}. May speed up things
-a lot when testing many (or large) known good files.
+@itemx --no-check
+Skip initial test of @var{file} and @samp{zcmp}. May speed up things a lot
+when testing many (or large) known good files.
 
 @item -p @var{bytes}
 @itemx --position=@var{bytes}
@@ -1536,13 +1566,13 @@ Quiet operation. Suppress all messages.
 @item -s @var{bytes}
 @itemx --size=@var{bytes}
 Number of byte positions to test. If not specified, the rest of the file
-is tested (from @samp{--position} to end of file). Negative values are
+is tested (from @option{--position} to end of file). Negative values are
 relative to the rest of the file.
 
 @item -t
 @itemx --truncate
 Test all possible truncation points in the range specified by
-@samp{--position} and @samp{--size}.
+@option{--position} and @option{--size}.
 
 @item -v
 @itemx --verbose
@@ -1551,17 +1581,17 @@ Verbose mode.
 @item -z
 @itemx --zcmp=<command>
 Set zcmp command name and options. Defaults to @samp{zcmp}. Use
-@samp{--zcmp=false} to disable comparisons. If testing a decompressor
+@option{--zcmp=false} to disable comparisons. If testing a decompressor
 different from the one used by default by zcmp, it is needed to force
 unzcrash and zcmp to use the same decompressor with a command like
 @w{@samp{unzcrash --zcmp='zcmp --lz=plzip' 'plzip -t' @var{file}}}
 
 @end table
 
-Exit status: 0 for a normal exit, 1 for environmental problems (file not
-found, invalid flags, I/O errors, etc), 2 to indicate a corrupt or
-invalid input file, 3 for an internal consistency error (e.g., bug) which
-caused unzcrash to panic.
+Exit status: 0 for a normal exit, 1 for environmental problems
+(file not found, invalid command-line options, I/O errors, etc), 2 to
+indicate a corrupt or invalid input file, 3 for an internal consistency
+error (e.g., bug) which caused unzcrash to panic.
 
 
 @node Problems

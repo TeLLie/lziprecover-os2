@@ -1,12 +1,12 @@
 #! /bin/sh
 # configure script for Lziprecover - Data recovery tool for the lzip format
-# Copyright (C) 2009-2022 Antonio Diaz Diaz.
+# Copyright (C) 2009-2024 Antonio Diaz Diaz.
 #
 # This configure script is free software: you have unlimited permission
 # to copy, distribute, and modify it.
 
 pkgname=lziprecover
-pkgversion=1.23
+pkgversion=1.24
 progname=lziprecover
 srctrigger=doc/${pkgname}.texi
 
@@ -24,6 +24,7 @@ CXX=g++
 CPPFLAGS=
 CXXFLAGS='-Wall -W -O2'
 LDFLAGS=
+MAKEINFO=makeinfo
 
 # checking whether we are using GNU C++.
 /bin/sh -c "${CXX} --version" > /dev/null 2>&1 || { CXX=c++ ; CXXFLAGS=-O2 ; }
@@ -57,7 +58,7 @@ while [ $# != 0 ] ; do
 		echo "Options and variables: [defaults in brackets]"
 		echo "  -h, --help            display this help and exit"
 		echo "  -V, --version         output version information and exit"
-		echo "  --srcdir=DIR          find the sources in DIR [. or ..]"
+		echo "  --srcdir=DIR          find the source code in DIR [. or ..]"
 		echo "  --prefix=DIR          install into DIR [${prefix}]"
 		echo "  --exec-prefix=DIR     base directory for arch-dependent files [${exec_prefix}]"
 		echo "  --bindir=DIR          user executables directory [${bindir}]"
@@ -65,10 +66,11 @@ while [ $# != 0 ] ; do
 		echo "  --infodir=DIR         info files directory [${infodir}]"
 		echo "  --mandir=DIR          man pages directory [${mandir}]"
 		echo "  CXX=COMPILER          C++ compiler to use [${CXX}]"
-		echo "  CPPFLAGS=OPTIONS      command line options for the preprocessor [${CPPFLAGS}]"
-		echo "  CXXFLAGS=OPTIONS      command line options for the C++ compiler [${CXXFLAGS}]"
+		echo "  CPPFLAGS=OPTIONS      command-line options for the preprocessor [${CPPFLAGS}]"
+		echo "  CXXFLAGS=OPTIONS      command-line options for the C++ compiler [${CXXFLAGS}]"
 		echo "  CXXFLAGS+=OPTIONS     append options to the current value of CXXFLAGS"
-		echo "  LDFLAGS=OPTIONS       command line options for the linker [${LDFLAGS}]"
+		echo "  LDFLAGS=OPTIONS       command-line options for the linker [${LDFLAGS}]"
+		echo "  MAKEINFO=NAME         makeinfo program to use [${MAKEINFO}]"
 		echo
 		exit 0 ;;
 	--version | -V)
@@ -96,6 +98,7 @@ while [ $# != 0 ] ; do
 	CXXFLAGS=*)  CXXFLAGS=${optarg} ;;
 	CXXFLAGS+=*) CXXFLAGS="${CXXFLAGS} ${optarg}" ;;
 	LDFLAGS=*)    LDFLAGS=${optarg} ;;
+	MAKEINFO=*)  MAKEINFO=${optarg} ;;
 
 	--*)
 		echo "configure: WARNING: unrecognized option: '${option}'" 1>&2 ;;
@@ -115,7 +118,7 @@ while [ $# != 0 ] ; do
 	fi
 done
 
-# Find the source files, if location was not specified.
+# Find the source code, if location was not specified.
 srcdirtext=
 if [ -z "${srcdir}" ] ; then
 	srcdirtext="or . or .." ; srcdir=.
@@ -127,7 +130,7 @@ if [ -z "${srcdir}" ] ; then
 fi
 
 if [ ! -r "${srcdir}/${srctrigger}" ] ; then
-	echo "configure: Can't find sources in ${srcdir} ${srcdirtext}" 1>&2
+	echo "configure: Can't find source code in ${srcdir} ${srcdirtext}" 1>&2
 	echo "configure: (At least ${srctrigger} is missing)." 1>&2
 	exit 1
 fi
@@ -147,7 +150,7 @@ if [ -z "${no_create}" ] ; then
 # This script is free software: you have unlimited permission
 # to copy, distribute, and modify it.
 
-exec /bin/sh $0 ${args} --no-create
+exec /bin/sh "$0" ${args} --no-create
 EOF
 	chmod +x config.status
 fi
@@ -164,10 +167,11 @@ echo "CXX = ${CXX}"
 echo "CPPFLAGS = ${CPPFLAGS}"
 echo "CXXFLAGS = ${CXXFLAGS}"
 echo "LDFLAGS = ${LDFLAGS}"
+echo "MAKEINFO = ${MAKEINFO}"
 rm -f Makefile
 cat > Makefile << EOF
 # Makefile for Lziprecover - Data recovery tool for the lzip format
-# Copyright (C) 2009-2022 Antonio Diaz Diaz.
+# Copyright (C) 2009-2024 Antonio Diaz Diaz.
 # This file was generated automatically by configure. Don't edit.
 #
 # This Makefile is free software: you have unlimited permission
@@ -187,6 +191,7 @@ CXX = ${CXX}
 CPPFLAGS = ${CPPFLAGS}
 CXXFLAGS = ${CXXFLAGS}
 LDFLAGS = ${LDFLAGS}
+MAKEINFO = ${MAKEINFO}
 EOF
 cat "${srcdir}/Makefile.in" >> Makefile
 

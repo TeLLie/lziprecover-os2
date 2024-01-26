@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -81,12 +81,12 @@ public:
   int read_header_carefully( Lzip_header & header, const bool ignore_errors )
     {
     int sz = 0;
-    while( sz < Lzip_header::size && !finished() )
+    while( sz < header.size && !finished() )
       {
       header.data[sz] = buffer[pos];
       if( ignore_errors &&
           ( ( sz < 4 && header.data[sz] != lzip_magic[sz] ) ||
-            ( sz == 4 && !header.verify_version() ) ||
+            ( sz == 4 && !header.check_version() ) ||
             ( sz == 5 && !isvalid_ds( header.dictionary_size() ) ) ) ) break;
       ++pos; ++sz;
       }
@@ -100,18 +100,20 @@ public:
       if( buffer[pos] != lzip_magic[0] ) { ++pos; continue; }
       reset_member_position();
       Lzip_header h;
-      if( read_header_carefully( h, true ) == Lzip_header::size )
+      if( read_header_carefully( h, true ) == header.size )
         { header = h; return true; }
       }
     return false;
     }
 
-  void load()
+  bool load( const bool ignore_marking = true )
     {
     code = 0;
-    for( int i = 0; i < 5; ++i ) code = ( code << 8 ) | get_byte();
     range = 0xFFFFFFFFU;
-    code &= range;		// make sure that first byte is discarded
+    // check and discard first byte of the LZMA stream
+    if( get_byte() != 0 && !ignore_marking ) return false;
+    for( int i = 0; i < 4; ++i ) code = ( code << 8 ) | get_byte();
+    return true;
     }
 
   void normalize()
@@ -136,7 +138,7 @@ public:
     return symbol;
     }
 
-  unsigned decode_bit( Bit_model & bm )
+  bool decode_bit( Bit_model & bm )
     {
     normalize();
     const uint32_t bound = ( range >> bit_model_total_bits ) * bm.probability;
@@ -303,7 +305,7 @@ class LZ_decoder
   unsigned long long stream_position() const
     { return partial_data_pos + stream_pos; }
   void flush_data();
-  bool verify_trailer( const Pretty_print & pp ) const;
+  int check_trailer( const Pretty_print & pp, const bool ignore_empty ) const;
 
   uint8_t peek_prev() const
     { return buffer[((pos > 0) ? pos : dictionary_size)-1]; }
@@ -379,5 +381,7 @@ public:
   unsigned crc() const { return crc_ ^ 0xFFFFFFFFU; }
   unsigned long long data_position() const { return partial_data_pos + pos; }
 
-  int decode_member( const Pretty_print & pp );
+  int decode_member( const Cl_options & cl_opts, const Pretty_print & pp );
+  int decode_member()
+    { return decode_member( Cl_options(), Pretty_print( "" ) ); }
   };

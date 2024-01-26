@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -35,18 +35,17 @@
 
 namespace {
 
-bool decompress_member( const int infd, const Pretty_print & pp,
-                        const unsigned long long mpos,
-                        const unsigned long long outskip,
-                        const unsigned long long outend )
+bool decompress_member( const int infd, const Cl_options & cl_opts,
+          const Pretty_print & pp, const unsigned long long mpos,
+          const unsigned long long outskip, const unsigned long long outend )
   {
   Range_decoder rdec( infd );
   Lzip_header header;
-  rdec.read_data( header.data, Lzip_header::size );
+  rdec.read_data( header.data, header.size );
   if( rdec.finished() )			// End Of File
     { pp( "File ends unexpectedly at member header." ); return false; }
-  if( !header.verify_magic() ) { pp( bad_magic_msg ); return false; }
-  if( !header.verify_version() )
+  if( !header.check_magic() ) { pp( bad_magic_msg ); return false; }
+  if( !header.check_version() )
     { pp( bad_version( header.version() ) ); return false; }
   const unsigned dictionary_size = header.dictionary_size();
   if( !isvalid_ds( dictionary_size ) ) { pp( bad_dict_msg ); return false; }
@@ -54,7 +53,7 @@ bool decompress_member( const int infd, const Pretty_print & pp,
   if( verbosity >= 2 ) pp();
 
   LZ_decoder decoder( rdec, dictionary_size, outfd, outskip, outend );
-  const int result = decoder.decode_member( pp );
+  const int result = decoder.decode_member( cl_opts, pp );
   if( result != 0 )
     {
     if( verbosity >= 0 && result <= 2 )
@@ -86,23 +85,23 @@ const char * format_num( unsigned long long num,
                          unsigned long long limit,
                          const int set_prefix )
   {
-  const char * const si_prefix[8] =
-    { "k", "M", "G", "T", "P", "E", "Z", "Y" };
-  const char * const binary_prefix[8] =
-    { "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi", "Yi" };
-  enum { buffers = 8, bufsize = 32 };
+  enum { buffers = 8, bufsize = 32, n = 10 };
+  const char * const si_prefix[n] =
+    { "k", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q" };
+  const char * const binary_prefix[n] =
+    { "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi", "Yi", "Ri", "Qi" };
   static char buffer[buffers][bufsize];	// circle of static buffers for printf
   static int current = 0;
   static bool si = true;
 
   if( set_prefix ) si = ( set_prefix > 0 );
   unsigned long long den = 1;
-  const unsigned factor = ( si ? 1000 : 1024 );
+  const unsigned factor = si ? 1000 : 1024;
   char * const buf = buffer[current++]; current %= buffers;
-  const char * const * prefix = ( si ? si_prefix : binary_prefix );
+  const char * const * prefix = si ? si_prefix : binary_prefix;
   const char * p = "";
 
-  for( int i = 0; i < 8 && num / den >= factor && den * factor > den; ++i )
+  for( int i = 0; i < n && num / den >= factor && den * factor > den; ++i )
     { if( num / den <= limit && num % ( den * factor ) != 0 ) break;
       den *= factor; p = prefix[i]; }
   if( num % den == 0 )
@@ -113,36 +112,36 @@ const char * format_num( unsigned long long num,
   }
 
 
-bool safe_seek( const int fd, const long long pos )
+bool safe_seek( const int fd, const long long pos,
+                const char * const filename )
   {
   if( lseek( fd, pos, SEEK_SET ) == pos ) return true;
-  show_error( "Seek error", errno ); return false;
+  show_file_error( filename, "Seek error", errno );
+  return false;
   }
 
 
 int range_decompress( const std::string & input_filename,
                       const std::string & default_output_filename,
-                      Block range, const bool force, const bool ignore_errors,
-                      const bool ignore_trailing, const bool loose_trailing,
-                      const bool to_stdout )
+                      const Cl_options & cl_opts, Block range,
+                      const bool force, const bool to_stdout )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;
-  const int infd =
-    open_instream( input_filename.c_str(), &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
-  const Lzip_index lzip_index( infd, ignore_trailing, loose_trailing,
-                               ignore_errors, ignore_errors );
+  const Lzip_index lzip_index( infd, cl_opts, cl_opts.ignore_errors,
+                               cl_opts.ignore_errors );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename.c_str(), lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
   const long long udata_size = lzip_index.udata_size();
   if( range.end() > udata_size )
     range.size( std::max( 0LL, udata_size - range.pos() ) );
   if( range.size() <= 0 )
-    { if( udata_size > 0 )
-        show_file_error( input_filename.c_str(), "Nothing to do." );
+    { if( udata_size > 0 ) show_file_error( filename, "Nothing to do." );
       return 0; }
 
   if( to_stdout || default_output_filename.empty() ) outfd = STDOUT_FILENO;
@@ -150,7 +149,7 @@ int range_decompress( const std::string & input_filename,
     {
     output_filename = default_output_filename;
     set_signal_handler();
-    if( !open_outstream( force, true, false, false ) ) return 1;
+    if( !open_outstream( force, true, false, false, true ) ) return 1;
     }
 
   if( verbosity >= 1 )
@@ -171,14 +170,16 @@ int range_decompress( const std::string & input_filename,
       const long long outskip = std::max( 0LL, range.pos() - db.pos() );
       const long long outend = std::min( db.size(), range.end() - db.pos() );
       const long long mpos = lzip_index.mblock( i ).pos();
-      if( !safe_seek( infd, mpos ) ) cleanup_and_fail( 1 );
-      if( !decompress_member( infd, pp, mpos, outskip, outend ) )
-        { if( !ignore_errors ) cleanup_and_fail( 2 ); else error = true; }
+      if( !safe_seek( infd, mpos, filename ) ) cleanup_and_fail( 1 );
+      if( !decompress_member( infd, cl_opts, pp, mpos, outskip, outend ) )
+        { if( cl_opts.ignore_errors ) error = true; else cleanup_and_fail( 2 ); }
       pp.reset();
       }
     }
-  close( infd );
-  if( close_outstream( &in_stats ) != 0 ) cleanup_and_fail( 1 );
+  if( close( infd ) != 0 )
+    { show_file_error( filename, "Error closing input file", errno );
+      cleanup_and_fail( 1 ); }
+  if( !close_outstream( &in_stats ) ) cleanup_and_fail( 1 );
   if( verbosity >= 2 && !error )
     std::fputs( "Byte range decompressed successfully.\n", stderr );
   return 0;				// either no error or ignored

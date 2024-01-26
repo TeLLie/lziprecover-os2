@@ -46,9 +46,9 @@ the beginning is a thing of the past.
 Compression may be good for long-term archiving. For compressible data,
 multiple compressed copies may provide redundancy in a more useful form and
 may have a better chance of surviving intact than one uncompressed copy
-using the same amount of storage space. This is specially true if the format
-provides recovery capabilities like those of lziprecover, which is able to
-find and combine the good parts of several damaged copies.
+using the same amount of storage space. This is especially true if the
+format provides recovery capabilities like those of lziprecover, which is
+able to find and combine the good parts of several damaged copies.
 
 Lziprecover is able to recover or decompress files produced by any of the
 compressors in the lzip family: lzip, plzip, minilzip/lzlib, clzip, and
@@ -60,7 +60,7 @@ from damaged lzip files.
 
 If a file is too damaged for lziprecover to repair it, all the recoverable
 data in all members of the file can be extracted in one step with the
-command 'lziprecover -cd -i file.lz > file'.
+command 'lziprecover -cd --ignore-errors file.lz > file'.
 
 When recovering data, lziprecover takes as arguments the names of the
 damaged files and writes zero or more recovered files depending on the
@@ -84,11 +84,10 @@ Julian Seward's bzip2. Type 'make unzcrash' in the lziprecover source
 directory to build it. Then try 'unzcrash --help'.
 
 
-Copyright (C) 2009-2022 Antonio Diaz Diaz.
+Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
 This file is free documentation: you have unlimited permission to copy,
 distribute, and modify it.
 
-The file Makefile.in is a data file used by configure to produce the
-Makefile. It has the same copyright owner and permissions that configure
-itself.
+The file Makefile.in is a data file used by configure to produce the Makefile.
+It has the same copyright owner and permissions that configure itself.

@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2022 Antonio Diaz Diaz.
+   Copyright (C) 2009-2024 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -19,11 +19,14 @@ struct Bad_byte
   {
   enum Mode { literal, delta, flip };
   long long pos;
+  const char * argument;
   const char * option_name;
   Mode mode;
   uint8_t value;
 
-  Bad_byte() : pos( -1 ), option_name( 0 ), mode( literal ), value( 0 ) {}
+  Bad_byte() :
+    pos( -1 ), argument( 0 ), option_name( 0 ), mode( literal ), value( 0 ) {}
+
   uint8_t operator()( const uint8_t old_value ) const
     {
     if( mode == delta ) return old_value + value;
@@ -34,6 +37,8 @@ struct Bad_byte
   void parse_bb( const char * const arg, const char * const pn );
   };
 
+
+const char * const mem_msg = "Not enough memory.";
 
 // defined in main_common.cc
 void show_error( const char * const msg, const int errcode = 0,
