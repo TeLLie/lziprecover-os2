@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -59,7 +59,7 @@ int dump_members( const std::vector< std::string > & filenames,
   bool stdin_used = false;
   for( unsigned i = 0; i < filenames.size(); ++i )
     {
-    const bool from_stdin = ( filenames[i] == "-" );
+    const bool from_stdin = filenames[i] == "-";
     if( from_stdin ) { if( stdin_used ) continue; else stdin_used = true; }
     const char * const input_filename =
       from_stdin ? "(stdin)" : filenames[i].c_str();
@@ -93,8 +93,8 @@ int dump_members( const std::vector< std::string > & filenames,
         if( in == !strip )
           {
           if( !safe_seek( infd, stream_pos, input_filename ) ||
-              !copy_file( infd, outfd, mb.pos() - stream_pos ) )
-            cleanup_and_fail( 1 );
+              !copy_file( infd, outfd, filenames[i], output_filename,
+                          mb.pos() - stream_pos ) ) cleanup_and_fail( 1 );
           copied_size += mb.pos() - stream_pos; ++members;
           }
         else { stripped_size += mb.pos() - stream_pos; ++smembers; }
@@ -106,12 +106,13 @@ int dump_members( const std::vector< std::string > & filenames,
       if( !in && member_list.damaged )
         {
         if( !safe_seek( infd, mb.pos(), input_filename ) ) cleanup_and_fail( 1 );
-        in = ( test_member_from_file( infd, mb.size() ) != 0 );	// damaged
+        in = test_member_from_file( infd, mb.size() ) != 0;	// damaged
         }
       if( in == !strip )
         {
         if( !safe_seek( infd, mb.pos(), input_filename ) ||
-            !copy_file( infd, outfd, mb.size() ) ) cleanup_and_fail( 1 );
+            !copy_file( infd, outfd, filenames[i], output_filename,
+                        mb.size() ) ) cleanup_and_fail( 1 );
         copied_size += mb.size(); ++members;
         }
       else { stripped_size += mb.size(); ++smembers; }
@@ -131,7 +132,8 @@ int dump_members( const std::vector< std::string > & filenames,
         ( !strip || i + 1 >= filenames.size() ) )	// strip all but last
       {
       if( !safe_seek( infd, cdata_size, input_filename ) ||
-          !copy_file( infd, outfd, trailing_size ) ) cleanup_and_fail( 1 );
+          !copy_file( infd, outfd, filenames[i], output_filename,
+                      trailing_size ) ) cleanup_and_fail( 1 );
       copied_tsize += trailing_size;
       }
     else if( trailing_size > 0 ) { stripped_tsize += trailing_size; ++tfiles; }
@@ -210,7 +212,8 @@ int remove_members( const std::vector< std::string > & filenames,
           if( stream_pos != prev_end &&
               ( !safe_seek( infd, prev_end, filename ) ||
                 !safe_seek( fd, stream_pos, filename ) ||
-                !copy_file( infd, fd, mb.pos() - prev_end ) ) )
+                !copy_file( infd, fd, filenames[i], filenames[i],
+                            mb.pos() - prev_end ) ) )
             { error = true; set_retval( retval, 1 ); break; }
           stream_pos += mb.pos() - prev_end;
           }
@@ -224,14 +227,14 @@ int remove_members( const std::vector< std::string > & filenames,
         {
         if( !safe_seek( infd, mb.pos(), filename ) )
           { error = true; set_retval( retval, 1 ); break; }
-        in = ( test_member_from_file( infd, mb.size() ) != 0 );	// damaged
+        in = test_member_from_file( infd, mb.size() ) != 0;	// damaged
         }
       if( !in )
         {
         if( stream_pos != mb.pos() &&
             ( !safe_seek( infd, mb.pos(), filename ) ||
               !safe_seek( fd, stream_pos, filename ) ||
-              !copy_file( infd, fd, mb.size() ) ) )
+              !copy_file( infd, fd, filenames[i], filenames[i], mb.size() ) ) )
           { error = true; set_retval( retval, 1 ); break; }
         stream_pos += mb.size();
         }
@@ -254,7 +257,7 @@ int remove_members( const std::vector< std::string > & filenames,
         if( stream_pos != cdata_size &&
             ( !safe_seek( infd, cdata_size, filename ) ||
               !safe_seek( fd, stream_pos, filename ) ||
-              !copy_file( infd, fd, trailing_size ) ) )
+              !copy_file( infd, fd, filenames[i], filenames[i], trailing_size ) ) )
           { close( fd ); close( infd ); set_retval( retval, 1 ); break; }
         stream_pos += trailing_size;
         }
@@ -298,8 +301,8 @@ int remove_members( const std::vector< std::string > & filenames,
 
 /* Set to zero in place the first LZMA byte of each member in each file by
    opening one rw descriptor for each file. */
-int clear_marking( const std::vector< std::string > & filenames,
-                   const Cl_options & cl_opts )
+int nonzero_repair( const std::vector< std::string > & filenames,
+                    const Cl_options & cl_opts )
   {
   long cleared_members = 0;
   int files = 0, retval = 0;
@@ -310,8 +313,7 @@ int clear_marking( const std::vector< std::string > & filenames,
     const int fd = open_truncable_stream( filename, &in_stats );
     if( fd < 0 ) { set_retval( retval, 1 ); continue; }
 
-    const Lzip_index lzip_index( fd, cl_opts, cl_opts.ignore_errors,
-                                 cl_opts.ignore_errors );
+    const Lzip_index lzip_index( fd, cl_opts, true, cl_opts.ignore_errors );
     if( lzip_index.retval() != 0 )
       {
       show_file_error( filename, lzip_index.error().c_str() );
@@ -332,7 +334,7 @@ int clear_marking( const std::vector< std::string > & filenames,
       if( seek_read( fd, header_buf, bufsize, mb.pos() ) != bufsize )
         { show_file_error( filename, "Error reading member header", errno );
           set_retval( retval, 1 ); break; }
-      if( !header.check( cl_opts.ignore_errors ) )
+      if( !header.check( true ) )
         { show_file_error( filename, "Member header became corrupt as we read it." );
           set_retval( retval, 2 ); break; }
       if( *mark == 0 ) continue;

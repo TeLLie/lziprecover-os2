@@ -1,3 +1,19 @@
+2025-01-08  Antonio Diaz Diaz  <antonio@gnu.org>
+
+	* Version 1.25 released.
+	* New options '-F, --fec', '-0' to '-9', '-b, --block-size',
+	  '--fec-file', '-r, --recursive', and '-R, --dereference-recursive'.
+	* Change short name of option '--byte-repair' to '-B'.
+	* byte_repair.cc: Repair a nonzero first LZMA byte.
+	* Make '-i' ignore empty members and nonzero first LZMA byte.
+	* Rename option '--clear-marking' to '--nonzero-repair'.
+	* Remove options '--empty-error' and '--marking-error'.
+	* decoder.cc (decode_member): Remove support for Sync Flush marker.
+	* merge.cc (copy_file): Add name arguments, use 'show_file_error'.
+	* lziprecover.texi: New chapter 'Syntax of command-line arguments'.
+	* check.sh: Use 'cp' instead of 'cat'.
+	* testsuite: Require lzip/clzip. Change several test files.
+
 2024-01-20  Antonio Diaz Diaz  <antonio@gnu.org>
 
 	* Version 1.24 released.
@@ -122,11 +138,10 @@
 	* repair.cc: Repair a damaged dictionary size in the header.
 	* repair.cc: Try bytes at offsets 7 to 11 first.
 	* Decompression time has been reduced by 2%.
-	* main.cc (decompress): Print up to 6 bytes of trailing data
-	  when '-tvvvv' is specified.
-	* decoder.cc (verify_trailer): Remove test of final code.
 	* main.cc (main): Delete '--output' file if infd is a terminal.
-	* main.cc (main): Don't use stdin more than once.
+	  (main): Don't use stdin more than once.
+	  (decompress): Print 6 bytes of trailing data at verbosity level 4.
+	* decoder.cc (verify_trailer): Remove test of final code.
 	* Use 'close_and_set_permissions' and 'set_signals' in all modes.
 	* range_dec.cc (list_file): Show dictionary size and size of
 	  trailing data (if any) with '-lv'.
@@ -142,8 +157,7 @@
 	* lziprecover.texi: New chapter 'Trailing data'.
 	* configure: Avoid warning on some shells when testing for g++.
 	* Makefile.in: Detect the existence of install-info.
-	* check.sh: Don't check error messages.
-	* check.sh: A POSIX shell is required to run the tests.
+	* check.sh: Require a POSIX shell. Don't check error messages.
 
 2015-05-28  Antonio Diaz Diaz  <antonio@gnu.org>
 
@@ -166,8 +180,8 @@
 2013-09-14  Antonio Diaz Diaz  <antonio@gnu.org>
 
 	* Version 1.15 released.
-	* repair.cc: Repair multimember files with up to one byte error
-	  per member.
+	* repair.cc: Repair multimember files with up to one byte error per
+	  member.
 	* merge.cc: Merge multimember files.
 	* main.cc (show_header): Don't show header version.
 	* lziprecover.texinfo: New chapters 'Repairing files',
@@ -180,23 +194,22 @@
 	* Option '-l, --list' now accepts more than one file.
 	* Decompression time has been reduced by 12%.
 	* split.cc: Use as few digits as possible in file names.
-	* split.cc: In verbose mode show names of files being created.
+	  In verbose mode show names of files being created.
 	* main.cc (show_header): Show header version if verbosity >= 4.
+	  (main): Use 'setmode' instead of '_setmode' on Windows and OS/2.
 	* configure: Options now accept a separate argument.
 	* Makefile.in: New targets 'install-as-lzip' and 'install-bin'.
-	* main.cc: Use 'setmode' instead of '_setmode' on Windows and OS/2.
 
 2012-02-24  Antonio Diaz Diaz  <ant_diaz@teleline.es>
 
 	* Version 1.13 released.
-	* Lziprecover is now distributed in its own package. Until
-	  version 1.12 it was included in the lzip package. Previous
-	  entries in this file are taken from there.
+	* Lziprecover is now distributed in its own package. Until version
+	  1.12 it was included in the lzip package. Previous entries in this
+	  file are taken from there.
 	* lziprecover.cc: Rename to main.cc.
 	* New files merge.cc, repair.cc, split.cc, and range_dec.cc.
-	* main.cc: Add decompressor options (-c, -d, -k, -t) so that
-	  an external decompressor is not needed for recovery nor for
-	  "make check".
+	* main.cc: Add decompressor options (-c, -d, -k, -t) so that an
+	  external decompressor is not needed for recovery and 'make check'.
 	* New option '-D, --range-decompress', which extracts a range of
 	  bytes decompressing only the members containing the desired data.
 	* New option '-l, --list', which prints correct total file sizes
@@ -211,25 +224,23 @@
 	* Version 1.12 released.
 	* lziprecover.cc: If '-v' is not specified show errors only.
 	* unzcrash.cc: Use Arg_parser.
-	* unzcrash.cc: New options '-b, --bits', '-p, --position', and
-	  '-s, --size'.
+	  New options '-b, --bits', '-p, --position', and '-s, --size'.
 
 2010-09-16  Antonio Diaz Diaz  <ant_diaz@teleline.es>
 
 	* Version 1.11 released.
-	* lziprecover.cc: New option '-m, --merge', which tries to produce a
-	  correct file by merging the good parts of two or more damaged copies.
-	* lziprecover.cc: New option '-R, --repair' for repairing a
-	  1-byte error in single-member files.
 	* decoder.cc (decode_member): Detect file errors earlier to improve
 	  efficiency of lziprecover's new repair capability.
 	  This change also prevents (harmless) access to uninitialized
 	  memory when decompressing a corrupt file.
-	* lziprecover.cc: New options '-f, --force' and '-o, --output'.
-	* lziprecover.cc: New option '-s, --split' to select the until
-	  now only operation of splitting multimember files.
-	* lziprecover.cc: If no operation is specified, warn the user and do
-	  nothing.
+	* lziprecover.cc: New option '-m, --merge', which tries to produce a
+	  correct file by merging the good parts of two or more damaged copies.
+	  New option '-R, --repair' for repairing a 1-byte error in
+	  single-member files.
+	  New options '-f, --force' and '-o, --output'.
+	  New option '-s, --split' to select the until now only operation of
+	  splitting multimember files.
+	  If no operation is specified, warn the user and do nothing.
 
 2009-06-22  Antonio Diaz Diaz  <ant_diaz@teleline.es>
 
@@ -244,8 +255,7 @@
 	* unzcrash.cc: Test all 1-byte errors.
 
 
-Copyright (C) 2009-2024 Antonio Diaz Diaz.
+Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
-This file is a collection of facts, and thus it is not copyrightable,
-but just in case, you have unlimited permission to copy, distribute, and
-modify it.
+This file is a collection of facts, and thus it is not copyrightable, but just
+in case, you have unlimited permission to copy, distribute, and modify it.

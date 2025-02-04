@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -67,13 +67,10 @@ void Lzip_index::set_num_error( const char * const msg, unsigned long long num )
 
 
 bool Lzip_index::read_header( const int fd, Lzip_header & header,
-                              const long long pos, const bool ignore_marking )
+                              const long long pos )
   {
   if( seek_read( fd, header.data, header.size, pos ) != header.size )
     { set_errno_error( "Error reading member header: " ); return false; }
-  uint8_t byte;
-  if( !ignore_marking && readblock( fd, &byte, 1 ) == 1 && byte != 0 )
-    { error_ = marking_msg; retval_ = 2; return false; }
   return true;
   }
 
@@ -123,8 +120,7 @@ bool Lzip_index::skip_gap( const int fd, unsigned long long & pos,
           { while( i > trailer.size && buffer[i-9] == 0 ) --i; continue; }
         if( member_size > ipos + i || !trailer.check_consistency() ) continue;
         Lzip_header header;
-        if( !read_header( fd, header, ipos + i - member_size,
-                          cl_opts.ignore_marking ) ) return false;
+        if( !read_header( fd, header, ipos + i - member_size ) ) return false;
         if( !header.check( ignore_bad_ds ) ) continue;
         const Lzip_header & header2 = *(const Lzip_header *)( buffer + i );
         const bool full_h2 = bsize - i >= header.size;
@@ -152,15 +148,12 @@ bool Lzip_index::skip_gap( const int fd, unsigned long long & pos,
           if( !cl_opts.ignore_trailing )
             { error_ = trailing_msg; retval_ = 2; return false; }
           }
-        const unsigned long long data_size = trailer.data_size();
-        if( !cl_opts.ignore_empty && data_size == 0 )
-          { error_ = empty_msg; retval_ = 2; return false; }
         pos = ipos + i - member_size;			// good member
         const unsigned dictionary_size = header.dictionary_size();
         if( dictionary_size_ < dictionary_size )
           dictionary_size_ = dictionary_size;
-        member_vector.push_back( Member( 0, data_size, pos, member_size,
-                                         dictionary_size ) );
+        member_vector.push_back( Member( 0, trailer.data_size(), pos,
+                                         member_size, dictionary_size ) );
         return true;
         }
     if( ipos == 0 )
@@ -192,18 +185,18 @@ Lzip_index::Lzip_index( const int infd, const Cl_options & cl_opts,
   {
   if( insize < 0 )
     { set_errno_error( "Input file is not seekable: " ); return; }
+  Lzip_header header;
+  if( insize >= header.size &&
+      ( !read_header( infd, header, 0 ) ||
+        !check_header( header, ignore_bad_ds ) ) ) return;
   if( insize < min_member_size )
-    { error_ = "Input file is too short."; retval_ = 2; return; }
+    { error_ = "Input file is truncated."; retval_ = 2; return; }
   if( insize > INT64_MAX )
     { error_ = "Input file is too long (2^63 bytes or more).";
       retval_ = 2; return; }
 
-  Lzip_header header;
-  if( !read_header( infd, header, 0, cl_opts.ignore_marking ) ||
-      !check_header( header, ignore_bad_ds ) ) return;
-
   // pos always points to a header or to ( EOF || max_pos )
-  unsigned long long pos = ( max_pos > 0 ) ? max_pos : insize;
+  unsigned long long pos = (max_pos > 0) ? max_pos : insize;
   while( pos >= min_member_size )
     {
     Lzip_trailer trailer;
@@ -219,8 +212,7 @@ Lzip_index::Lzip_index( const int infd, const Cl_options & cl_opts,
             continue; else return; }
       set_num_error( "Bad trailer at pos ", pos - trailer.size ); break;
       }
-    if( !read_header( infd, header, pos - member_size, cl_opts.ignore_marking ) )
-      break;
+    if( !read_header( infd, header, pos - member_size ) ) break;
     if( !header.check( ignore_bad_ds ) )		// bad header
       {
       if( ignore_gaps || member_vector.empty() )
@@ -228,15 +220,12 @@ Lzip_index::Lzip_index( const int infd, const Cl_options & cl_opts,
             continue; else return; }
       set_num_error( "Bad header at pos ", pos - member_size ); break;
       }
-    const unsigned long long data_size = trailer.data_size();
-    if( !cl_opts.ignore_empty && data_size == 0 )
-      { error_ = empty_msg; retval_ = 2; break; }
     pos -= member_size;					// good member
     const unsigned dictionary_size = header.dictionary_size();
     if( dictionary_size_ < dictionary_size )
       dictionary_size_ = dictionary_size;
-    member_vector.push_back( Member( 0, data_size, pos, member_size,
-                                     dictionary_size ) );
+    member_vector.push_back( Member( 0, trailer.data_size(), pos,
+                                     member_size, dictionary_size ) );
     }
   // block at pos == 0 must be a member unless shorter than min_member_size
   if( pos >= min_member_size || ( pos != 0 && !ignore_gaps ) ||
@@ -272,7 +261,7 @@ Lzip_index::Lzip_index( const std::vector< int > & infd_vector,
   if( insize < 0 )
     { set_errno_error( "Input file is not seekable: " ); return; }
   if( insize < min_member_size )
-    { error_ = "Input file is too short."; retval_ = 2; return; }
+    { error_ = short_file_msg; retval_ = 2; return; }
   if( insize > INT64_MAX )
     { error_ = "Input file is too long (2^63 bytes or more).";
       retval_ = 2; return; }

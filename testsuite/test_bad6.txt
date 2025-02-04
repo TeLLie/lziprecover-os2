@@ -1,6 +1,3 @@
-)  You can apply it to
-your programs, too.
-
   When we speak of free software, we are referring to freedom, not
 price.  Our General Public Licenses are designed to make sure that you
 have the freedom to distribute copies of free software (and charge for
@@ -23,4 +20,10 @@ rights.
 (2) offer you this license which gives you legal permission to copy,
 distribute and/or modify the software.
 
-  Also, for each author's protection and ours, we want to
+  Also, for each author's protection and ours, we want to make certain
+that everyone understands that there is no warranty for this free
+software.  If the software is modified by someone else and passed on, we
+want its recipients to know that what they have is not the original, so
+that any problems introduced by others will not reflect on the original
+authors' reputations.
+

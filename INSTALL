@@ -4,9 +4,10 @@ You will need a C++98 compiler with support for 'long long'.
 (gcc 3.3.6 or newer is recommended).
 I use gcc 6.1.0 and 3.3.6, but the code should compile with any standards
 compliant compiler.
-Gcc is available at http://gcc.gnu.org.
+Gcc is available at http://gcc.gnu.org
 
 Lzip 1.16 (or clzip 1.6) or newer is required to run the tests.
+Lzip is available at http://www.nongnu.org/lzip/lzip.html
 
 Unzcrash needs a 'zcmp' program able to understand the format being tested.
 For example the zcmp provided by zutils.
@@ -78,7 +79,7 @@ After running 'configure', you can run 'make' and 'make install' as
 explained above.
 
 
-Copyright (C) 2009-2024 Antonio Diaz Diaz.
+Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
 This file is free documentation: you have unlimited permission to copy,
 distribute, and modify it.

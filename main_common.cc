@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -15,9 +15,12 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+int cl_verbosity = 0;		// used to silence internal_error if '-q'
+int verbosity = 0;
+
 namespace {
 
-const char * const program_year = "2024";
+const char * const program_year = "2025";
 
 void show_version()
   {
@@ -30,7 +33,7 @@ void show_version()
 
 
 // separate numbers of 5 or more digits in groups of 3 digits using '_'
-const char * format_num3( long long num )
+const char * format_num3p( long long num, const bool raw = false )
   {
   enum { buffers = 8, bufsize = 4 * sizeof num, n = 10 };
   const char * const si_prefix = "kMGTPEZYRQ";
@@ -42,7 +45,7 @@ const char * format_num3( long long num )
   char * p = buf + bufsize - 1;		// fill the buffer backwards
   *p = 0;	// terminator
   const bool negative = num < 0;
-  if( num > 1024 || num < -1024 )
+  if( !raw && ( num > 9999 || num < -9999 ) )
     {
     char prefix = 0;			// try binary first, then si
     for( int i = 0; i < n && num != 0 && num % 1024 == 0; ++i )
@@ -136,8 +139,8 @@ long long getnum( const char * const arg, const char * const option_name,
     {
     if( verbosity >= 0 )
       std::fprintf( stderr, "%s: '%s': Value out of limits [%s,%s] in "
-                    "option '%s'.\n", program_name, arg, format_num3( llimit ),
-                    format_num3( ulimit ), option_name );
+                    "option '%s'.\n", program_name, arg, format_num3p( llimit ),
+                    format_num3p( ulimit ), option_name );
     std::exit( 1 );
     }
   if( tailp ) *tailp = tail;
@@ -148,7 +151,6 @@ long long getnum( const char * const arg, const char * const option_name,
 
 
 // Recognized formats: <pos>,<value> <pos>,+<value> <pos>,f<value>
-//
 void Bad_byte::parse_bb( const char * const arg, const char * const pn )
   {
   argument = arg;
@@ -164,6 +166,9 @@ void Bad_byte::parse_bb( const char * const arg, const char * const pn )
   else mode = literal;
   value = getnum( tail + 1, option_name, 0, 0, 255 );
   }
+
+
+const char * format_num3( long long num ) { return format_num3p( num, true ); }
 
 
 void show_error( const char * const msg, const int errcode, const bool help )
@@ -191,7 +196,7 @@ void show_file_error( const char * const filename, const char * const msg,
 
 void internal_error( const char * const msg )
   {
-  if( verbosity >= 0 )
+  if( cl_verbosity >= 0 )
     std::fprintf( stderr, "%s: internal error: %s\n", program_name, msg );
   std::exit( 3 );
   }

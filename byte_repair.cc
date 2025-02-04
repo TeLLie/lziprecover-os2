@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -58,6 +58,19 @@ bool gross_damage( const uint8_t * const mbuffer, const long msize )
   }
 
 
+// Return value: 0 = errors remain, 6 = repaired pos
+int repair_nonzero( uint8_t * const mbuffer, const long msize )
+  {
+  mbuffer[6] = 0;
+  const Lzip_header & header = *(Lzip_header *)mbuffer;
+  const unsigned dictionary_size = header.dictionary_size();
+  if( !isvalid_ds( dictionary_size ) ) return 0;
+  LZ_mtester mtester( mbuffer, msize, dictionary_size );
+  if( mtester.test_member() == 0 ) return 6;
+  return 0;
+  }
+
+
 // Return value: 0 = no change, 5 = repaired pos
 int repair_dictionary_size( uint8_t * const mbuffer, const long msize )
   {
@@ -69,10 +82,10 @@ int repair_dictionary_size( uint8_t * const mbuffer, const long msize )
   const bool valid_ds = isvalid_ds( dictionary_size );
   if( valid_ds && dictionary_size >= data_size ) return 0;	// can't be bad
 
-  const unsigned long long dictionary_size_9 = 1 << 25;	// dict size of opt -9
-  if( !valid_ds || dictionary_size < dictionary_size_9 )
+  const unsigned long long dict_size_9 = 1 << 25;	// dict size of opt -9
+  if( !valid_ds || dictionary_size < dict_size_9 )
     {
-    dictionary_size = std::min( data_size, dictionary_size_9 );
+    dictionary_size = std::min( data_size, dict_size_9 );
     if( dictionary_size < min_dictionary_size )
       dictionary_size = min_dictionary_size;
     LZ_mtester mtester( mbuffer, msize, dictionary_size );
@@ -82,7 +95,7 @@ int repair_dictionary_size( uint8_t * const mbuffer, const long msize )
     if( result != 1 || mtester.max_distance() <= dictionary_size ||
         mtester.max_distance() > max_dictionary_size ) return 0;
     }
-  if( data_size > dictionary_size_9 )
+  if( data_size > dict_size_9 )
     {
     dictionary_size =
       std::min( data_size, (unsigned long long)max_dictionary_size );
@@ -155,6 +168,15 @@ long repair_member( uint8_t * const mbuffer, const long long mpos,
 } // end namespace
 
 
+bool safe_seek( const int fd, const long long pos,
+                const std::string & filename )
+  {
+  if( lseek( fd, pos, SEEK_SET ) == pos ) return true;
+  show_file_error( filename.c_str(), "Seek error", errno );
+  return false;
+  }
+
+
 long seek_write( const int fd, const uint8_t * const buf, const long size,
                  const long long pos )
   {
@@ -165,16 +187,16 @@ long seek_write( const int fd, const uint8_t * const buf, const long size,
 
 
 uint8_t * read_member( const int infd, const long long mpos,
-                       const long long msize, const char * const filename )
+                       const long long msize, const std::string & filename )
   {
   if( msize <= 0 || msize > LONG_MAX )
-    { show_file_error( filename,
+    { show_file_error( filename.c_str(),
         "Input file contains member larger than LONG_MAX." ); return 0; }
   if( !safe_seek( infd, mpos, filename ) ) return 0;
   uint8_t * const buffer = new uint8_t[msize];
 
   if( readblock( infd, buffer, msize ) != msize )
-    { show_file_error( filename, "Error reading input file", errno );
+    { show_file_error( filename.c_str(), read_error_msg, errno );
       delete[] buffer; return 0; }
   return buffer;
   }
@@ -206,8 +228,10 @@ int byte_repair( const std::string & input_filename,
     const long long msize = lzip_index.mblock( i ).size();
     if( !safe_seek( infd, mpos, filename ) ) cleanup_and_fail( 1 );
     long long failure_pos = 0;
-    if( test_member_from_file( infd, msize, &failure_pos ) == 0 ) continue;
-    if( failure_pos < Lzip_header::size )		// End Of File
+    bool nonzero = false;
+    const int ret = test_member_from_file( infd, msize, &failure_pos, &nonzero );
+    if( ret == 0 && !nonzero ) continue;
+    if( ret != 0 && failure_pos < Lzip_header::size )		// End Of File
       { show_error( "Can't repair error in input file." );
         cleanup_and_fail( 2 ); }
     if( failure_pos >= msize - 8 ) failure_pos = msize - 8 - 1;
@@ -218,14 +242,17 @@ int byte_repair( const std::string & input_filename,
                    i + 1, lzip_index.members(), mpos + failure_pos );
       std::fflush( stdout );
       }
-    uint8_t * const mbuffer = read_member( infd, mpos, msize, filename );
+    uint8_t * const mbuffer = read_member( infd, mpos, msize, input_filename );
     if( !mbuffer ) cleanup_and_fail( 1 );
     const Lzip_header & header = *(const Lzip_header *)mbuffer;
     const unsigned dictionary_size = header.dictionary_size();
     long pos = 0;
+    if( !nonzero && mbuffer[6] != 0 ) nonzero = true;		// bad DS
     if( !gross_damage( mbuffer, msize ) )
       {
-      pos = repair_dictionary_size( mbuffer, msize );
+      if( nonzero ) pos = repair_nonzero( mbuffer, msize );
+      if( pos == 0 )
+        pos = repair_dictionary_size( mbuffer, msize );
       if( pos == 0 )
         pos = repair_member( mbuffer, mpos, msize, header.size + 1,
                              header.size + 6, dictionary_size, terminator );
@@ -243,12 +270,14 @@ int byte_repair( const std::string & input_filename,
         if( !safe_seek( infd, 0, filename ) ) return 1;
         set_signal_handler();
         if( !open_outstream( true, true, false, true, to_file ) ) return 1;
-        if( !copy_file( infd, outfd ) )		// copy whole file
-          cleanup_and_fail( 1 );
+        if( !copy_file( infd, outfd, input_filename, output_filename ) )
+          cleanup_and_fail( 1 );		// copy whole file
         }
-      if( seek_write( outfd, mbuffer + pos, 1, mpos + pos ) != 1 )
-        { show_error( "Error writing output file", errno );
-          cleanup_and_fail( 1 ); }
+      if( ( nonzero && pos != 6 &&
+            seek_write( outfd, mbuffer + 6, 1, mpos + 6 ) != 1 ) ||
+          seek_write( outfd, mbuffer + pos, 1, mpos + pos ) != 1 )
+        { show_file_error( printable_name( output_filename, false ),
+            wr_err_msg, errno ); cleanup_and_fail( 1 ); }
       }
     delete[] mbuffer;
     if( pos == 0 )
@@ -266,28 +295,30 @@ int byte_repair( const std::string & input_filename,
     }
   if( !close_outstream( &in_stats ) ) return 1;
   if( verbosity >= 1 )
-    std::fputs( "Copy of input file repaired successfully.\n", stdout );
+    std::printf( "Repaired copy of '%s' written to '%s'\n",
+                 filename, output_filename.c_str() );
   return 0;
   }
 
 
-int debug_delay( const char * const input_filename,
+int debug_delay( const std::string & input_filename,
                  const Cl_options & cl_opts, Block range,
                  const char terminator )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename, &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename, lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
   if( range.end() > lzip_index.cdata_size() )
     range.size( std::max( 0LL, lzip_index.cdata_size() - range.pos() ) );
   if( range.size() <= 0 )
-    { show_file_error( input_filename, "Nothing to do." ); return 0; }
+    { show_file_error( filename, "Nothing to do; range is empty." ); return 0; }
 
   for( long i = 0; i < lzip_index.members(); ++i )
     {
@@ -353,24 +384,26 @@ int debug_delay( const char * const input_filename,
   }
 
 
-int debug_byte_repair( const char * const input_filename,
+int debug_byte_repair( const std::string & input_filename,
                        const Cl_options & cl_opts, const Bad_byte & bad_byte,
                        const char terminator )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename, &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename, lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
   long idx = 0;
   for( ; idx < lzip_index.members(); ++idx )
     if( lzip_index.mblock( idx ).includes( bad_byte.pos ) ) break;
   if( idx >= lzip_index.members() )
-    { show_file_error( input_filename, "Nothing to do." ); return 0; }
+    { show_file_error( filename, "Nothing to do; byte is beyond EOF." );
+      return 0; }
 
   const long long mpos = lzip_index.mblock( idx ).pos();
   const long long msize = lzip_index.mblock( idx ).size();
@@ -389,11 +422,12 @@ int debug_byte_repair( const char * const input_filename,
   if( !mbuffer ) return 1;
   const Lzip_header & header = *(const Lzip_header *)mbuffer;
   const unsigned dictionary_size = header.dictionary_size();
-  const uint8_t good_value = mbuffer[bad_byte.pos-mpos];
+  const long long bad_pos = bad_byte.pos - mpos;
+  const uint8_t good_value = mbuffer[bad_pos];
   const uint8_t bad_value = bad_byte( good_value );
-  mbuffer[bad_byte.pos-mpos] = bad_value;
+  mbuffer[bad_pos] = bad_value;
   long failure_pos = 0;
-  if( bad_byte.pos != 5 || isvalid_ds( header.dictionary_size() ) )
+  if( bad_pos != 5 || isvalid_ds( header.dictionary_size() ) )
     {
     LZ_mtester mtester( mbuffer, msize, header.dictionary_size() );
     if( mtester.test_member() == 0 && mtester.finished() )
@@ -417,6 +451,8 @@ int debug_byte_repair( const char * const input_filename,
   if( failure_pos >= msize ) failure_pos = msize - 1;
   long pos = repair_dictionary_size( mbuffer, msize );
   if( pos == 0 )
+    if( mbuffer[6] != 0 ) pos = repair_nonzero( mbuffer, msize );
+  if( pos == 0 )
     pos = repair_member( mbuffer, mpos, msize, header.size + 1,
                          header.size + 6, dictionary_size, terminator );
   if( pos == 0 )
@@ -438,21 +474,21 @@ int debug_byte_repair( const char * const input_filename,
    (Packet sizes are a fractionary number of bytes. The packet and marker
    sizes shown by option -X are the number of extra bytes required to decode
    the packet, not counting the data present in the range decoder before and
-   after the decoding. The max marker size of a 'Sync Flush marker' does not
-   include the 5 bytes read by rdec.load).
+   after the decoding.
    if bad_byte.pos >= cdata_size, bad_byte is ignored.
 */
-int debug_decompress( const char * const input_filename,
+int debug_decompress( const std::string & input_filename,
                       const Cl_options & cl_opts, const Bad_byte & bad_byte,
                       const bool show_packets )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;
-  const int infd = open_instream( input_filename, &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename, lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
   outfd = show_packets ? -1 : STDOUT_FILENO;

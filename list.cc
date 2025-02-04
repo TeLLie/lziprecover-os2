@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -17,6 +17,7 @@
 
 #define _FILE_OFFSET_BITS 64
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -57,7 +58,7 @@ int list_files( const std::vector< std::string > & filenames,
 
   for( unsigned i = 0; i < filenames.size(); ++i )
     {
-    const bool from_stdin = ( filenames[i] == "-" );
+    const bool from_stdin = filenames[i] == "-";
     if( from_stdin ) { if( stdin_used ) continue; else stdin_used = true; }
     const char * const input_filename =
       from_stdin ? "(stdin)" : filenames[i].c_str();
@@ -75,6 +76,9 @@ int list_files( const std::vector< std::string > & filenames,
       set_retval( retval, lzip_index.retval() );
       continue;
       }
+    const bool multi_empty =
+      !from_stdin && !cl_opts.ignore_errors && lzip_index.multi_empty();
+    if( multi_empty ) set_retval( retval, 2 );
     if( verbosity < 0 ) continue;
     const unsigned long long udata_size = lzip_index.udata_size();
     const unsigned long long cdata_size = lzip_index.cdata_size();
@@ -86,6 +90,8 @@ int list_files( const std::vector< std::string > & filenames,
       if( verbosity >= 1 ) std::fputs( "   dict   memb  trail ", stdout );
       std::fputs( "  uncompressed     compressed   saved  name\n", stdout );
       }
+    if( multi_empty )
+      { std::fflush( stdout ); show_file_error( input_filename, empty_msg ); }
     if( verbosity >= 1 )
       std::printf( "%s %5ld %6lld ", format_ds( lzip_index.dictionary_size() ),
                    members, lzip_index.file_size() - cdata_size );
@@ -113,12 +119,16 @@ int list_files( const std::vector< std::string > & filenames,
       first_post = true;	// reprint heading after list of members
       }
     std::fflush( stdout );
+    if( std::ferror( stdout ) ) break;
     }
-  if( verbosity >= 0 && files > 1 )
+  if( verbosity >= 0 && files > 1 && !std::ferror( stdout ) )
     {
     if( verbosity >= 1 ) std::fputs( "                      ", stdout );
     list_line( total_uncomp, total_comp, "(totals)" );
     std::fflush( stdout );
     }
+  if( verbosity >= 0 && ( std::ferror( stdout ) || std::fclose( stdout ) != 0 ) )
+    { show_file_error( "(stdout)", wr_err_msg, errno );
+      set_retval( retval, 1 ); }
   return retval;
   }

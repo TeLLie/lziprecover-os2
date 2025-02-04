@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -83,7 +83,7 @@ void LZ_mtester::flush_data()
     crc32.update_buf( crc_, buffer + stream_pos, size );
     if( md5sum ) md5sum->md5_update( buffer + stream_pos, size );
     if( outfd >= 0 && writeblock( outfd, buffer + stream_pos, size ) != size )
-      throw Error( "Write error" );
+      throw Error( wr_err_msg );
     if( pos >= dictionary_size )
       { partial_data_pos += pos; pos = 0; pos_wrapped = true; }
     stream_pos = pos;
@@ -148,7 +148,7 @@ int LZ_mtester::test_member( const unsigned long mpos_limit,
                              FILE * const f, const unsigned long long byte_pos )
   {
   if( mpos_limit < Lzip_header::size + 5 ) return -1;
-  if( member_position() == Lzip_header::size ) rdec.load();
+  if( member_position() == Lzip_header::size && !rdec.load() ) return 1;
   while( !rdec.finished() )
     {
     if( member_position() >= mpos_limit || data_position() >= dpos_limit )
@@ -171,7 +171,7 @@ int LZ_mtester::test_member( const unsigned long mpos_limit,
       if( rdec.decode_bit( bm_rep0[state()] ) == 0 )		// 3rd bit
         {
         if( rdec.decode_bit( bm_len[state()][pos_state] ) == 0 ) // 4th bit
-          { state.set_short_rep(); put_byte( peek( rep0 ) ); continue; }
+          { state.set_shortrep(); put_byte( peek( rep0 ) ); continue; }
         }
       else
         {
@@ -194,22 +194,22 @@ int LZ_mtester::test_member( const unsigned long mpos_limit,
       }
     else					// match
       {
+      rep3 = rep2; rep2 = rep1; rep1 = rep0;
       len = rdec.decode_len( match_len_model, pos_state );
-      unsigned distance = rdec.decode_tree6( bm_dis_slot[get_len_state(len)] );
-      if( distance >= start_dis_model )
+      rep0 = rdec.decode_tree6( bm_dis_slot[get_len_state(len)] );
+      if( rep0 >= start_dis_model )
         {
-        const unsigned dis_slot = distance;
+        const unsigned dis_slot = rep0;
         const int direct_bits = ( dis_slot >> 1 ) - 1;
-        distance = ( 2 | ( dis_slot & 1 ) ) << direct_bits;
+        rep0 = ( 2 | ( dis_slot & 1 ) ) << direct_bits;
         if( dis_slot < end_dis_model )
-          distance += rdec.decode_tree_reversed(
-                      bm_dis + ( distance - dis_slot ), direct_bits );
+          rep0 += rdec.decode_tree_reversed( bm_dis + ( rep0 - dis_slot ),
+                                             direct_bits );
         else
           {
-          distance +=
-            rdec.decode( direct_bits - dis_align_bits ) << dis_align_bits;
-          distance += rdec.decode_tree_reversed4( bm_align );
-          if( distance == 0xFFFFFFFFU )		// marker found
+          rep0 += rdec.decode( direct_bits - dis_align_bits ) << dis_align_bits;
+          rep0 += rdec.decode_tree_reversed4( bm_align );
+          if( rep0 == 0xFFFFFFFFU )		// marker found
             {
             rdec.normalize();
             flush_data();
@@ -224,7 +224,6 @@ int LZ_mtester::test_member( const unsigned long mpos_limit,
             }
           }
         }
-      rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = distance;
       if( rep0 > max_rep0 ) max_rep0 = rep0;
       state.set_match();
       if( rep0 >= dictionary_size || ( rep0 >= pos && !pos_wrapped ) )
@@ -242,7 +241,7 @@ int LZ_mtester::test_member( const unsigned long mpos_limit,
 int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
                                      const bool show_packets )
   {
-  rdec.load();
+  if( !rdec.load() ) return 1;
   unsigned old_tmpos = member_position();	// truncated member position
   while( !rdec.finished() )
     {
@@ -290,7 +289,7 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
             std::printf( "%6llu %6llu shortrep %s %6u (%6llu)\n",
                          mp, dp, format_byte( peek( rep0 ) ),
                          rep0 + 1, dp - rep0 - 1 );
-          state.set_short_rep(); put_byte( peek( rep0 ) ); continue;
+          state.set_shortrep(); put_byte( peek( rep0 ) ); continue;
           }
         }
       else
@@ -317,22 +316,22 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
       }
     else					// match
       {
+      rep3 = rep2; rep2 = rep1; rep1 = rep0;
       len = rdec.decode_len( match_len_model, pos_state );
-      unsigned distance = rdec.decode_tree6( bm_dis_slot[get_len_state(len)] );
-      if( distance >= start_dis_model )
+      rep0 = rdec.decode_tree6( bm_dis_slot[get_len_state(len)] );
+      if( rep0 >= start_dis_model )
         {
-        const unsigned dis_slot = distance;
+        const unsigned dis_slot = rep0;
         const int direct_bits = ( dis_slot >> 1 ) - 1;
-        distance = ( 2 | ( dis_slot & 1 ) ) << direct_bits;
+        rep0 = ( 2 | ( dis_slot & 1 ) ) << direct_bits;
         if( dis_slot < end_dis_model )
-          distance += rdec.decode_tree_reversed(
-                      bm_dis + ( distance - dis_slot ), direct_bits );
+          rep0 += rdec.decode_tree_reversed( bm_dis + ( rep0 - dis_slot ),
+                                             direct_bits );
         else
           {
-          distance +=
-            rdec.decode( direct_bits - dis_align_bits ) << dis_align_bits;
-          distance += rdec.decode_tree_reversed4( bm_align );
-          if( distance == 0xFFFFFFFFU )		// marker found
+          rep0 += rdec.decode( direct_bits - dis_align_bits ) << dis_align_bits;
+          rep0 += rdec.decode_tree_reversed4( bm_align );
+          if( rep0 == 0xFFFFFFFFU )		// marker found
             {
             rdec.normalize();
             flush_data();
@@ -349,13 +348,10 @@ int LZ_mtester::debug_decode_member( const long long dpos, const long long mpos,
               if( check_trailer( show_packets ? stdout : 0 ) ) return 0;
               return 3;
               }
-            if( len == min_match_len + 1 )	// Sync Flush marker
-              { rdec.load(); continue; }
             return 4;
             }
           }
         }
-      rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = distance;
       if( rep0 > max_rep0 ) { max_rep0 = rep0; max_rep0_pos = mp; }
       state.set_match();
       if( show_packets )

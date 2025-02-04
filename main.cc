@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -26,15 +26,17 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
-#include <climits>		// SSIZE_MAX
+#include <climits>		// CHAR_BIT, SSIZE_MAX
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <list>
 #include <string>
 #include <vector>
 #include <fcntl.h>
+#include <pthread.h>		// pthread_t
 #include <stdint.h>		// SIZE_MAX
 #include <unistd.h>
 #include <utime.h>
@@ -42,8 +44,10 @@
 #if defined __MSVCRT__ || defined __OS2__ || defined __DJGPP__
 #include <io.h>
 #if defined __MSVCRT__
+#include <direct.h>
 #define fchmod(x,y) 0
 #define fchown(x,y,z) 0
+#define mkdir(name,mode) _mkdir(name)
 #define SIGHUP SIGTERM
 #define S_ISSOCK(x) 0
 #ifndef S_IRGRP
@@ -62,6 +66,8 @@
 #include "arg_parser.h"
 #include "lzip.h"
 #include "decoder.h"
+#include "md5.h"
+#include "fec.h"
 
 #ifndef O_BINARY
 #define O_BINARY 0
@@ -77,10 +83,7 @@
 #endif
 
 bool fits_in_size_t( const unsigned long long size )	// fits also in long
-  { return ( sizeof (long) <= sizeof (size_t) && size <= LONG_MAX ) ||
-           ( sizeof (int) <= sizeof (size_t) && size <= INT_MAX ); }
-
-int verbosity = 0;
+  { return sizeof (long) <= sizeof (size_t) && size <= LONG_MAX; }
 
 const char * const program_name = "lziprecover";
 std::string output_filename;	// global vars for output file
@@ -95,33 +98,29 @@ const struct { const char * from; const char * to; } known_extensions[] = {
   { ".tlz", ".tar" },
   { 0,      0      } };
 
-enum Mode { m_none, m_alone_to_lz, m_byte_repair, m_clear_marking,
-            m_debug_byte_repair, m_debug_decompress, m_debug_delay,
-            m_decompress, m_dump, m_list, m_md5sum, m_merge, m_nrep_stats,
-            m_range_dec, m_remove, m_reproduce, m_show_packets, m_split,
-            m_strip, m_test, m_unzcrash_bit, m_unzcrash_block };
+enum Mode { m_none, m_alone_to_lz, m_byte_repair, m_check, m_debug_byte_repair,
+            m_debug_decompress, m_debug_delay, m_decompress, m_dump,
+            m_fec_create, m_fec_repair, m_fec_test, m_fec_list, m_fec_dc,
+            m_fec_dz, m_fec_dZ, m_list, m_md5sum, m_merge, m_nonzero_repair,
+            m_nrep_stats, m_range_dec, m_remove, m_reproduce, m_show_packets,
+            m_split, m_strip, m_test, m_unzcrash_bit, m_unzcrash_block };
 
-/* Variable used in signal handler context.
-   It is not declared volatile because the handler never returns. */
+/* Variables used in signal handler context.
+   They are not declared volatile because the handler never returns. */
 bool delete_output_on_interrupt = false;
 
 
-void show_help()
+void show_help( const long num_online )
   {
   std::printf( "Lziprecover is a data recovery tool and decompressor for files in the lzip\n"
-               "compressed data format (.lz). Lziprecover is able to repair slightly damaged\n"
-               "files (up to one single-byte error per member), produce a correct file by\n"
-               "merging the good parts of two or more damaged copies, reproduce a missing\n"
-               "(zeroed) sector using a reference file, extract data from damaged files,\n"
-               "decompress files, and test integrity of files.\n"
+               "compressed data format (.lz). Lziprecover also provides Forward Error\n"
+               "Correction (FEC) able to repair any kind of file.\n"
                "\nWith the help of lziprecover, losing an entire archive just because of a\n"
                "corrupt byte near the beginning is a thing of the past.\n"
                "\nLziprecover can remove the damaged members from multimember files, for\n"
                "example multimember tar.lz archives.\n"
                "\nLziprecover provides random access to the data in multimember files; it only\n"
                "decompresses the members containing the desired data.\n"
-               "\nLziprecover facilitates the management of metadata stored as trailing data\n"
-               "in lzip files.\n"
                "\nLziprecover is not a replacement for regular backups, but a last line of\n"
                "defense for the case where the backups are also damaged.\n"
                "\nUsage: %s [options] [files]\n", invocation_name );
@@ -130,6 +129,8 @@ void show_help()
                "  -V, --version                 output version information and exit\n"
                "  -a, --trailing-error          exit with error status if trailing data\n"
                "  -A, --alone-to-lz             convert lzma-alone files to lzip format\n"
+               "  -b, --block-size=<bytes>      make FEC block size a multiple of <bytes>\n"
+               "  -B, --byte-repair             try to repair a corrupt byte in file\n"
                "  -c, --stdout                  write to standard output, keep input files\n"
                "  -d, --decompress              decompress, test compressed file integrity\n"
                "  -D, --range-decompress=<n-m>  decompress a range of bytes to stdout\n"
@@ -138,39 +139,52 @@ void show_help()
                "      --lzip-name=<name>        name of lzip executable for --reproduce\n"
                "      --reference-file=<file>   reference file for --reproduce\n"
                "  -f, --force                   overwrite existing output files\n"
-               "  -i, --ignore-errors           ignore some errors in -d, -D, -l, -t, --dump\n"
+               "  -F, --fec=c[N]|r|t|l          create, repair, test, list (using) fec file\n"
+               "  -0 .. -9                      set FEC fragmentation level [default 9]\n"
+               "      --fec-file=<file>[/]      read fec file from <file> or directory\n"
+               "  -i, --ignore-errors           ignore non-fatal errors\n"
                "  -k, --keep                    keep (don't delete) input files\n"
                "  -l, --list                    print (un)compressed file sizes\n"
                "  -m, --merge                   repair errors in file using several copies\n"
-               "  -o, --output=<file>           place the output into <file>\n"
+               "  -n, --threads=<n>             set number of threads for fec create [%ld]\n"
+               "  -o, --output=<file>[/]        place the output into <file> or directory\n"
                "  -q, --quiet                   suppress all messages\n"
-               "  -R, --byte-repair             try to repair a corrupt byte in file\n"
+               "  -r, --recursive               (fec) operate recursively on directories\n"
+               "  -R, --dereference-recursive   (fec) recursively follow symbolic links\n"
                "  -s, --split                   split multimember file in single-member files\n"
                "  -t, --test                    test compressed file integrity\n"
                "  -v, --verbose                 be verbose (a 2nd -v gives more)\n"
                "      --dump=<list>:d:e:t       dump members, damaged/empty, tdata to stdout\n"
                "      --remove=<list>:d:e:t     remove members, tdata from files in place\n"
                "      --strip=<list>:d:e:t      copy files to stdout stripping members given\n"
-               "      --empty-error             exit with error status if empty member in file\n"
-               "      --marking-error           exit with error status if 1st LZMA byte not 0\n"
                "      --loose-trailing          allow trailing data seeming corrupt header\n"
-               "      --clear-marking           reset the first LZMA byte of each member\n" );
+               "      --nonzero-repair          repair in place a nonzero first LZMA byte\n",
+               num_online );
   if( verbosity >= 1 )
     {
     std::printf( "\nDebug options for experts:\n"
                  "  -E, --debug-reproduce=<range>[,ss]  set range to 0 and try to reproduce file\n"
+                 "  -F, --fec=dc<n>                   test repair combinations of n zeroed blocks\n"
+                 "  -F, --fec=dz<range>[:<range>]...  test repair zeroed block(s) at range(s)\n"
+                 "  -F, --fec=dZ<size>[,<delta>]      test repair zeroed blocks of size <size>\n"
                  "  -M, --md5sum                      print the MD5 digests of the input files\n"
                  "  -S, --nrep-stats[=<val>]          print stats of N-byte repeated sequences\n"
                  "  -U, --unzcrash=1|B<size>          test 1-bit or block errors in input file\n"
                  "  -W, --debug-decompress=<pos>,<val>  set pos to val and decompress to stdout\n"
                  "  -X, --show-packets[=<pos>,<val>]  show in stdout the decoded LZMA packets\n"
                  "  -Y, --debug-delay=<range>         find max error detection delay in <range>\n"
-                 "  -Z, --debug-byte-repair=<pos>,<val>  test repair one-byte error at <pos>\n" );
+                 "  -Z, --debug-byte-repair=<pos>,<val>  test repair one-byte error at <pos>\n"
+                 "      --check=<size>                check creation of FEC decode matrix\n"
+                 "      --debug=<level>               print parallel FEC statistics to stderr\n"
+                 "      --gf16                        use GF(2^16) to create fec files\n"
+                 "      --random                      create fec files with random block numbers\n" );
     }
   std::printf( "\nIf no file names are given, or if a file is '-', lziprecover decompresses\n"
                "from standard input to standard output.\n"
                "Numbers may be followed by a multiplier: k = kB = 10^3 = 1000,\n"
                "Ki = KiB = 2^10 = 1024, M = 10^6, Mi = 2^20, G = 10^9, Gi = 2^30, etc...\n"
+               "The argument to --fec=create may be a number of blocks (-Fc20), a\n"
+               "percentage (-Fc5%%), or a size in bytes (-Fc10KiB).\n"
                "\nTo extract all the files from archive 'foo.tar.lz', use the commands\n"
                "'tar -xf foo.tar.lz' or 'lziprecover -cd foo.tar.lz | tar -xf -'.\n"
                "\nExit status: 0 for a normal exit, 1 for environmental problems\n"
@@ -213,7 +227,7 @@ const char * format_ds( const unsigned dictionary_size )
   const char * p = "";
   const char * np = "  ";
   unsigned num = dictionary_size;
-  bool exact = ( num % factor == 0 );
+  bool exact = num % factor == 0;
 
   for( int i = 0; i < n && ( num > 9999 || ( exact && num >= factor ) ); ++i )
     { num /= factor; if( num % factor != 0 ) exact = false;
@@ -248,12 +262,12 @@ void Member_list::parse_ml( const char * const arg,
       if( len <= 7 && std::strncmp( "damaged", p, len ) == 0 )
         { damaged = true; cl_opts.ignore_errors = true; goto next; }
       if( len <= 5 && std::strncmp( "empty", p, len ) == 0 )
-        { empty = true; cl_opts.ignore_empty = true; goto next; }
+        { empty = true; goto next; }
       if( len <= 5 && std::strncmp( "tdata", p, len ) == 0 )
         { tdata = true; cl_opts.ignore_trailing = true; goto next; }
       }
     {
-    const bool reverse = ( *p == 'r' );
+    const bool reverse = *p == 'r';
     if( reverse ) ++p;
     if( *p == '^' ) { ++p; if( reverse ) rin = false; else in = false; }
     std::vector< Block > * rvp = reverse ? &rrange_vector : &range_vector;
@@ -279,13 +293,14 @@ next:
 
 namespace {
 
+const char * const inv_arg_msg = "Invalid argument in";
+
 // Recognized formats: <digit> 'a' m[<match_length>]
 int parse_lzip_level( const char * const arg, const char * const option_name )
   {
   if( *arg == 'a' || std::isdigit( *(const unsigned char *)arg ) ) return *arg;
   if( *arg != 'm' )
-    { show_option_error( arg, "Invalid argument in", option_name );
-      std::exit( 1 ); }
+    { show_option_error( arg, inv_arg_msg, option_name ); std::exit( 1 ); }
   if( arg[1] == 0 ) return -1;
   return -getnum( arg + 1, option_name, 0, min_match_len_limit, max_match_len );
   }
@@ -306,7 +321,7 @@ const char * parse_range( const char * const arg, const char * const pn,
     range.pos( value );
     if( tail[0] == 0 || tail[0] == ':' )
       { range.size( INT64_MAX - value ); return tail; }
-    const bool is_size = ( tail[0] == ',' );
+    const bool is_size = tail[0] == ',';
     if( sector_sizep && tail[1] == ',' ) { value = INT64_MAX - value; ++tail; }
     else value = getnum( tail + 1, pn, 0, 1, INT64_MAX, &tail );	// size
     if( !is_size && value <= range.pos() )
@@ -324,6 +339,61 @@ const char * parse_range( const char * const arg, const char * const pn,
   std::exit( 1 );
   }
 
+
+// Insert b in its place or merge it with contiguous or overlapping blocks.
+void insert_block_sorted( std::vector< Block > & block_vector, const Block & b )
+  {
+  if( block_vector.empty() || b.pos() > block_vector.back().end() )
+    { block_vector.push_back( b ); return; }	// append at the end
+  const long long pos = b.pos();
+  const long long end = b.end();
+  for( unsigned long i = 0; i < block_vector.size(); ++i )
+    if( end <= block_vector[i].pos() )		// maybe insert b before i
+      {
+      if( end < block_vector[i].pos() &&
+          ( i == 0 || pos > block_vector[i-1].end() ) )
+        { block_vector.insert( block_vector.begin() + i, b ); return; }
+      break;
+      }
+  for( unsigned long i = 0; i < block_vector.size(); ++i )
+    if( block_vector[i].touches( b ) )	// merge b with blocks touching it
+      {
+      unsigned long j = i;	// indexes of first/last mergeable blocks
+      while( j + 1 < block_vector.size() && block_vector[j+1].touches( b ) )
+        ++j;
+      const long long new_pos = std::min( pos, block_vector[i].pos() );
+      const long long new_end = std::max( end, block_vector[j].end() );
+      block_vector[i].assign( new_pos, new_end - new_pos );
+      if( i < j ) block_vector.erase( block_vector.begin() + i + 1,
+                                      block_vector.begin() + j + 1 );
+      break;
+      }
+  }
+
+/* Recognized format: <range>[:<range>]...
+   Allow unordered, overlapping ranges. Return ranges sorted and merged. */
+void parse_range_vector( const char * const arg, const char * const pn,
+                         std::vector< Block > & range_vector )
+  {
+  Block range( 0, 0 );
+  const char * p = arg;
+  while( true )
+    {
+    p = parse_range( p, pn, range );
+    insert_block_sorted( range_vector, range );
+    if( *p == 0 ) return;
+    if( *p == ':' ) { ++p; if( *p == 0 ) return; else continue; }
+    show_option_error( p, "Extra characters in", pn );
+    std::exit( 1 );
+    }
+  }
+
+
+void no_to_stdout( const bool to_stdout )
+  {
+  if( to_stdout )
+    { show_error( "'--stdout' not allowed." ); std::exit( 1 ); }
+  }
 
 void one_file( const int files )
   {
@@ -355,6 +425,81 @@ void set_mode( Mode & program_mode, const Mode new_mode )
   }
 
 
+// return true if arg is a non-empty prefix of target
+bool compare_prefix( const char * const arg, const char * const target,
+                     const char * const option_name = 0,
+                     unsigned long * const fb_or_pctp = 0, char * fctypep = 0 )
+  {
+  if( arg[0] == target[0] )
+    for( int i = 1; i < INT_MAX; ++i )
+      {
+      if( arg[i] == 0 ) return true;
+      if( fb_or_pctp && std::isdigit( arg[i] ) )
+        {
+        const char * tail = arg + i;
+        const int llimit = std::strchr( tail, '.' ) ? 0 : 1;
+        *fb_or_pctp = getnum( tail, option_name, 0, llimit, LONG_MAX, &tail );
+        if( *tail == 0 )
+          { if( tail[-1] == 'B' ) { *fctypep = fc_bytes; return true; }
+            if( std::isdigit( tail[-1] ) )
+              { if( *fb_or_pctp <= max_nk16 )
+                  { *fctypep = fc_blocks; return true; }
+                getnum( arg + 1, option_name, 0, 1, max_nk16 ); } }
+        else if( *fb_or_pctp <= 100 && std::isdigit( tail[-1] ) )
+          { if( *tail == '%' && tail[1] == 0 )
+              { *fb_or_pctp *= 1000; *fctypep = fc_percent; return true; }
+            if( *tail == '.' && std::isdigit( *++tail ) )
+              { for( int j = 0; j < 3; ++j ) { *fb_or_pctp *= 10;
+                  if( std::isdigit( *tail ) ) *fb_or_pctp += *tail++ - '0'; }
+                if( *tail >= '5' && *tail <= '9' ) { ++tail; ++*fb_or_pctp; }
+                while( std::isdigit( *tail ) ) { ++tail;
+                  if( *fb_or_pctp == 0 && tail[-1] > '0' ) *fb_or_pctp = 1; }
+                if( *tail == '%' && tail[1] == 0 && *fb_or_pctp <= 100000 &&
+                    *fb_or_pctp > 0 ) { *fctypep = fc_percent; return true; } } }
+        return false;
+        }
+      if( arg[i] != target[i] ) break;
+      }
+  return false;
+  }
+
+
+void parse_fec( const char * const arg, const char * const option_name,
+                Mode & program_mode, unsigned long & fb_or_pct,
+                unsigned & cblocks, unsigned & delta, int & sector_size,
+                std::vector< Block > & range_vector, char & fctype )
+  {
+  if( compare_prefix( arg, "create", option_name, &fb_or_pct, &fctype ) )
+    set_mode( program_mode, m_fec_create );
+  else if( compare_prefix( arg, "repair" ) )
+    set_mode( program_mode, m_fec_repair );
+  else if( compare_prefix( arg, "test" ) )
+    set_mode( program_mode, m_fec_test );
+  else if( compare_prefix( arg, "list" ) )
+    set_mode( program_mode, m_fec_list );
+  else if( arg[0] == 'd' && arg[1] == 'c' )
+    { const char * tail = arg + 2;
+      cblocks = getnum( tail, option_name, 0, 1, max_nk16, &tail );
+      if( *tail != 0 )
+        { show_option_error( arg, inv_arg_msg, option_name ); std::exit( 1 ); }
+      set_mode( program_mode, m_fec_dc ); }
+  else if( arg[0] == 'd' && arg[1] == 'z' )
+    { parse_range_vector( arg + 2, option_name, range_vector );
+      set_mode( program_mode, m_fec_dz ); }
+  else if( arg[0] == 'd' && arg[1] == 'Z' )
+    { const char * tail = arg + 2;
+      sector_size = getnum( tail, option_name, 0, 1, INT_MAX, &tail );
+      if( *tail == 0 ) delta = sector_size;
+      else if( *tail == ',' )
+        delta = getnum( tail + 1, option_name, 0, 1, INT_MAX );
+      else { show_option_error( arg, "Comma expected before delta in",
+                                option_name ); std::exit( 1 ); }
+      set_mode( program_mode, m_fec_dZ ); }
+  else
+    { show_option_error( arg, inv_arg_msg, option_name ); std::exit( 1 ); }
+  }
+
+
 void parse_u( const char * const arg, const char * const option_name,
               Mode & program_mode, int & sector_size )
   {
@@ -363,8 +508,7 @@ void parse_u( const char * const arg, const char * const option_name,
     { set_mode( program_mode, m_unzcrash_block );
       sector_size = getnum( arg + 1, option_name, 0, 1, INT_MAX ); }
   else
-    { show_option_error( arg, "Invalid argument in", option_name );
-      std::exit( 1 ); }
+    { show_option_error( arg, inv_arg_msg, option_name ); std::exit( 1 ); }
   }
 
 
@@ -423,9 +567,9 @@ int open_instream( const char * const name, struct stat * const in_statsp,
     {
     const int i = fstat( infd, in_statsp );
     const mode_t mode = in_statsp->st_mode;
-    const bool can_read = ( i == 0 && !reg_only &&
-                            ( S_ISBLK( mode ) || S_ISCHR( mode ) ||
-                              S_ISFIFO( mode ) || S_ISSOCK( mode ) ) );
+    const bool can_read = i == 0 && !reg_only &&
+                          ( S_ISBLK( mode ) || S_ISCHR( mode ) ||
+                            S_ISFIFO( mode ) || S_ISSOCK( mode ) );
     if( i != 0 || ( !S_ISREG( mode ) && ( !can_read || one_to_one ) ) )
       {
       if( verbosity >= 0 )
@@ -487,6 +631,9 @@ bool make_dirs( const std::string & name )
 const char * const force_msg =
   "Output file already exists. Use '--force' to overwrite it.";
 
+unsigned char xdigit( const unsigned value )	// hex digit for 'value'
+  { return (value <= 9) ? '0' + value : (value <= 15) ? 'A' + value - 10 : 0; }
+
 } // end namespace
 
 bool open_outstream( const bool force, const bool protect,
@@ -499,8 +646,8 @@ bool open_outstream( const bool force, const bool protect,
   if( force ) flags |= O_TRUNC; else flags |= O_EXCL;
 
   outfd = -1;
-  if( output_filename.size() &&
-      output_filename[output_filename.size()-1] == '/' ) errno = EISDIR;
+  if( output_filename.size() && output_filename.end()[-1] == '/' )
+    errno = EISDIR;
   else {
     if( ( !protect || to_file ) && !make_dirs( output_filename ) )
       { show_file_error( output_filename.c_str(),
@@ -536,6 +683,7 @@ void set_signals( void (*action)(int) )
 void cleanup_and_fail( const int retval )
   {
   set_signals( SIG_IGN );			// ignore signals
+  cleanup_mutex_lock();		// only one thread can delete and exit
   if( delete_output_on_interrupt )
     {
     delete_output_on_interrupt = false;
@@ -557,6 +705,22 @@ bool check_tty_out()
                        "I won't write compressed data to a terminal." );
       return false; }
   return true;
+  }
+
+
+void format_trailing_bytes( const uint8_t * const data, const int size,
+                            std::string & msg )
+  {
+  for( int i = 0; i < size; ++i )
+    {
+    msg += xdigit( data[i] >> 4 );
+    msg += xdigit( data[i] & 0x0F );
+    msg += ' ';
+    }
+  msg += '\'';
+  for( int i = 0; i < size; ++i )
+    msg += std::isprint( data[i] ) ? data[i] : '.';
+  msg += '\'';
   }
 
 namespace {
@@ -617,14 +781,6 @@ void close_and_set_permissions( const struct stat * const in_statsp )
   }
 
 
-unsigned char xdigit( const unsigned value )	// hex digit for 'value'
-  {
-  if( value <= 9 ) return '0' + value;
-  if( value <= 15 ) return 'A' + value - 10;
-  return 0;
-  }
-
-
 bool show_trailing_data( const uint8_t * const data, const int size,
                          const Pretty_print & pp, const bool all,
                          const int ignore_trailing )	// -1 = show
@@ -634,16 +790,7 @@ bool show_trailing_data( const uint8_t * const data, const int size,
     std::string msg;
     if( !all ) msg = "first bytes of ";
     msg += "trailing data = ";
-    for( int i = 0; i < size; ++i )
-      {
-      msg += xdigit( data[i] >> 4 );
-      msg += xdigit( data[i] & 0x0F );
-      msg += ' ';
-      }
-    msg += '\'';
-    for( int i = 0; i < size; ++i )
-      { if( std::isprint( data[i] ) ) msg += data[i]; else msg += '.'; }
-    msg += '\'';
+    format_trailing_bytes( data, size, msg );
     pp( msg.c_str() );
     if( ignore_trailing == 0 ) show_file_error( pp.name(), trailing_msg );
     }
@@ -653,11 +800,12 @@ bool show_trailing_data( const uint8_t * const data, const int size,
 
 int decompress( const unsigned long long cfile_size, const int infd,
                 const Cl_options & cl_opts, const Pretty_print & pp,
-                const bool testing )
+                const bool from_stdin, const bool testing )
   {
   unsigned long long partial_file_pos = 0;
   Range_decoder rdec( infd );
   int retval = 0;
+  bool empty = false, multi = false;
 
   for( bool first_member = true; ; first_member = false )
     {
@@ -700,11 +848,10 @@ int decompress( const unsigned long long cfile_size, const int infd,
 
     LZ_decoder decoder( rdec, dictionary_size, outfd );
     show_dprogress( cfile_size, partial_file_pos, &rdec, &pp );	// init
-    const int result = decoder.decode_member( cl_opts, pp );
+    const int result = decoder.decode_member( pp, cl_opts.ignore_errors );
     partial_file_pos += rdec.member_position();
     if( result != 0 )
       {
-      retval = 2;
       if( verbosity >= 0 && result <= 2 )
         {
         pp();
@@ -712,15 +859,19 @@ int decompress( const unsigned long long cfile_size, const int infd,
                       "File ends unexpectedly" : "Decoder error",
                       partial_file_pos );
         }
-      else if( result == 5 ) { pp( empty_msg ); break; }
-      else if( result == 6 ) { pp( marking_msg ); break; }
+      else if( result == 5 ) pp( nonzero_msg );
+      retval = 2;
       if( cl_opts.ignore_errors ) { pp.reset(); continue; } else break;
       }
+    if( !from_stdin && !cl_opts.ignore_errors ) { multi = !first_member;
+      if( decoder.data_position() == 0 ) empty = true; }
     if( verbosity >= 2 )
       { std::fputs( testing ? "ok\n" : "done\n", stderr ); pp.reset(); }
     }
   if( verbosity == 1 && retval == 0 )
     std::fputs( testing ? "ok\n" : "done\n", stderr );
+  if( empty && multi && retval == 0 )
+    { show_file_error( pp.name(), empty_msg ); retval = 2; }
   if( retval == 2 && cl_opts.ignore_errors ) retval = 0;
   return retval;
   }
@@ -739,7 +890,7 @@ bool close_outstream( const struct stat * const in_statsp )
   }
 
 
-std::string insert_fixed( std::string name )
+std::string insert_fixed( std::string name, const bool append_lz )
   {
   if( name.size() > 7 && name.compare( name.size() - 7, 7, ".tar.lz" ) == 0 )
     name.insert( name.size() - 7, "_fixed" );
@@ -747,7 +898,8 @@ std::string insert_fixed( std::string name )
     name.insert( name.size() - 3, "_fixed" );
   else if( name.size() > 4 && name.compare( name.size() - 4, 4, ".tlz" ) == 0 )
     name.insert( name.size() - 4, "_fixed" );
-  else name += "_fixed.lz";
+  else if( append_lz ) name += "_fixed.lz";
+  else name += "_fixed";
   return name;
   }
 
@@ -794,72 +946,107 @@ void show_dprogress( const unsigned long long cfile_size,
 
 int main( const int argc, const char * const argv[] )
   {
+  std::vector< Block > range_vector;
   Block range( 0, 0 );
   int sector_size = INT_MAX;		// default larger than practical range
   Bad_byte bad_byte;
   Member_list member_list;
+  std::string cl_fec_filename;
   std::string default_output_filename;
   const char * lzip_name = "lzip";		// default is lzip
   const char * reference_filename = 0;
+  unsigned long fb_or_pct = 8;	// fec blocks, bytes (B), or 0.001% to 100%
+  unsigned cblocks = 0;		// blocks per combination in fec_dc
+  unsigned cl_block_size = 0;	// make fbs a multiple of this
+  unsigned num_workers = 0;	// start this many worker threads
+  unsigned delta = 0;		// set to 0 to keep gcc 6.1.0 quiet
   Mode program_mode = m_none;
   int lzip_level = 0;		//  0 = test all levels and match lengths
 				// '0'..'9' = level, 'a' = all levels
 				// -5..-273 = match length, -1 = all lengths
   int repeated_byte = -1;	// 0 to 255, or -1 for all values
   Cl_options cl_opts;		// command-line options
+  char debug_level = 0;
+  char fctype = fc_blocks;	// type of value in fb_or_pct
+  char fec_level = 9;		// fec fragmentation level, default = "-9"
+  char recursive = 0;		// 1 = '-r', 2 = '-R'
+  bool cl_gf16 = false;
+  bool fec_random = false;
   bool force = false;
   bool keep_input_files = false;
   bool to_stdout = false;
   if( argc > 0 ) invocation_name = argv[0];
 
-  enum { opt_cm = 256, opt_du, opt_eer, opt_lt, opt_lzl, opt_lzn, opt_mer,
-         opt_ref, opt_rem, opt_st };
+  enum { opt_chk = 256, opt_dbg, opt_du, opt_ff, opt_g16, opt_lt,
+         opt_lzl, opt_lzn, opt_nzr, opt_ref, opt_rem, opt_rnd, opt_st };
   const Arg_parser::Option options[] =
     {
-    { 'a', "trailing-error",     Arg_parser::no  },
-    { 'A', "alone-to-lz",        Arg_parser::no  },
-    { 'c', "stdout",             Arg_parser::no  },
-    { 'd', "decompress",         Arg_parser::no  },
-    { 'D', "range-decompress",   Arg_parser::yes },
-    { 'e', "reproduce",          Arg_parser::no  },
-    { 'E', "debug-reproduce",    Arg_parser::yes },
-    { 'f', "force",              Arg_parser::no  },
-    { 'h', "help",               Arg_parser::no  },
-    { 'i', "ignore-errors",      Arg_parser::no  },
-    { 'k', "keep",               Arg_parser::no  },
-    { 'l', "list",               Arg_parser::no  },
-    { 'm', "merge",              Arg_parser::no  },
-    { 'M', "md5sum",             Arg_parser::no  },
-    { 'n', "threads",            Arg_parser::yes },
-    { 'o', "output",             Arg_parser::yes },
-    { 'q', "quiet",              Arg_parser::no  },
-    { 'R', "byte-repair",        Arg_parser::no  },
-    { 'R', "repair",             Arg_parser::no  },
-    { 's', "split",              Arg_parser::no  },
-    { 'S', "nrep-stats",         Arg_parser::maybe },
-    { 't', "test",               Arg_parser::no  },
-    { 'U', "unzcrash",           Arg_parser::yes },
-    { 'v', "verbose",            Arg_parser::no  },
-    { 'V', "version",            Arg_parser::no  },
-    { 'W', "debug-decompress",   Arg_parser::yes },
-    { 'X', "show-packets",       Arg_parser::maybe },
-    { 'Y', "debug-delay",        Arg_parser::yes },
-    { 'Z', "debug-byte-repair",  Arg_parser::yes },
-    { opt_cm,  "clear-marking",  Arg_parser::no  },
-    { opt_du,  "dump",           Arg_parser::yes },
-    { opt_eer, "empty-error",    Arg_parser::no  },
-    { opt_lt,  "loose-trailing", Arg_parser::no  },
-    { opt_lzl, "lzip-level",     Arg_parser::yes },
-    { opt_lzn, "lzip-name",      Arg_parser::yes },
-    { opt_mer, "marking-error",  Arg_parser::no  },
-    { opt_ref, "reference-file", Arg_parser::yes },
-    { opt_rem, "remove",         Arg_parser::yes },
-    { opt_st,  "strip",          Arg_parser::yes },
-    {  0, 0,                     Arg_parser::no  } };
+    { '0', 0,                       Arg_parser::no  },
+    { '1', 0,                       Arg_parser::no  },
+    { '2', 0,                       Arg_parser::no  },
+    { '3', 0,                       Arg_parser::no  },
+    { '4', 0,                       Arg_parser::no  },
+    { '5', 0,                       Arg_parser::no  },
+    { '6', 0,                       Arg_parser::no  },
+    { '7', 0,                       Arg_parser::no  },
+    { '8', 0,                       Arg_parser::no  },
+    { '9', 0,                       Arg_parser::no  },
+    { 'a', "trailing-error",        Arg_parser::no  },
+    { 'A', "alone-to-lz",           Arg_parser::no  },
+    { 'b', "block-size",            Arg_parser::yes },
+    { 'B', "byte-repair",           Arg_parser::no  },
+    { 'B', "repair",                Arg_parser::no  },
+    { 'c', "stdout",                Arg_parser::no  },
+    { 'd', "decompress",            Arg_parser::no  },
+    { 'D', "range-decompress",      Arg_parser::yes },
+    { 'e', "reproduce",             Arg_parser::no  },
+    { 'E', "debug-reproduce",       Arg_parser::yes },
+    { 'f', "force",                 Arg_parser::no  },
+    { 'F', "fec",                   Arg_parser::yes },
+    { 'h', "help",                  Arg_parser::no  },
+    { 'i', "ignore-errors",         Arg_parser::no  },
+    { 'k', "keep",                  Arg_parser::no  },
+    { 'l', "list",                  Arg_parser::no  },
+    { 'm', "merge",                 Arg_parser::no  },
+    { 'M', "md5sum",                Arg_parser::no  },
+    { 'n', "threads",               Arg_parser::yes },
+    { 'o', "output",                Arg_parser::yes },
+    { 'q', "quiet",                 Arg_parser::no  },
+    { 'r', "recursive",             Arg_parser::no  },
+    { 'R', "dereference-recursive", Arg_parser::no  },
+    { 's', "split",                 Arg_parser::no  },
+    { 'S', "nrep-stats",            Arg_parser::maybe },
+    { 't', "test",                  Arg_parser::no  },
+    { 'U', "unzcrash",              Arg_parser::yes },
+    { 'v', "verbose",               Arg_parser::no  },
+    { 'V', "version",               Arg_parser::no  },
+    { 'W', "debug-decompress",      Arg_parser::yes },
+    { 'X', "show-packets",          Arg_parser::maybe },
+    { 'Y', "debug-delay",           Arg_parser::yes },
+    { 'Z', "debug-byte-repair",     Arg_parser::yes },
+    { opt_chk, "check",             Arg_parser::yes },
+    { opt_dbg, "debug",             Arg_parser::yes },
+    { opt_du,  "dump",              Arg_parser::yes },
+    { opt_ff,  "fec-file",          Arg_parser::yes },
+    { opt_g16, "gf16",              Arg_parser::no  },
+    { opt_lt,  "loose-trailing",    Arg_parser::no  },
+    { opt_lzl, "lzip-level",        Arg_parser::yes },
+    { opt_lzn, "lzip-name",         Arg_parser::yes },
+    { opt_nzr, "nonzero-repair",    Arg_parser::no  },
+    { opt_ref, "reference-file",    Arg_parser::yes },
+    { opt_rem, "remove",            Arg_parser::yes },
+    { opt_rnd, "random",            Arg_parser::no  },
+    { opt_st,  "strip",             Arg_parser::yes },
+    { 0, 0,                         Arg_parser::no  } };
 
   const Arg_parser parser( argc, argv, options );
   if( parser.error().size() )				// bad option
     { show_error( parser.error().c_str(), 0, true ); return 1; }
+
+  const long num_online = std::max( 1L, sysconf( _SC_NPROCESSORS_ONLN ) );
+  long max_workers = sysconf( _SC_THREAD_THREADS_MAX );
+  if( max_workers < 1 || max_workers > INT_MAX / (int)sizeof (pthread_t) )
+    max_workers = INT_MAX / sizeof (pthread_t);
 
   int argind = 0;
   for( ; argind < parser.arguments(); ++argind )
@@ -871,8 +1058,13 @@ int main( const int argc, const char * const argv[] )
     const char * const arg = sarg.c_str();
     switch( code )
       {
+      case '0': case '1': case '2': case '3': case '4': case '5':
+      case '6': case '7': case '8': case '9': fec_level = code - '0'; break;
       case 'a': cl_opts.ignore_trailing = false; break;
       case 'A': set_mode( program_mode, m_alone_to_lz ); break;
+      case 'b': cl_block_size = getnum( arg, pn, 0, min_fbs, max_unit_fbs ) &
+                ( max_unit_fbs - min_fbs ); break;
+      case 'B': set_mode( program_mode, m_byte_repair ); break;
       case 'c': to_stdout = true; break;
       case 'd': set_mode( program_mode, m_decompress ); break;
       case 'D': set_mode( program_mode, m_range_dec );
@@ -881,17 +1073,20 @@ int main( const int argc, const char * const argv[] )
       case 'E': set_mode( program_mode, m_reproduce );
                 parse_range( arg, pn, range, &sector_size ); break;
       case 'f': force = true; break;
-      case 'h': show_help(); return 0;
+      case 'F': parse_fec( arg, pn, program_mode, fb_or_pct, cblocks, delta,
+                           sector_size, range_vector, fctype ); break;
+      case 'h': show_help( num_online ); return 0;
       case 'i': cl_opts.ignore_errors = true; break;
       case 'k': keep_input_files = true; break;
       case 'l': set_mode( program_mode, m_list ); break;
       case 'm': set_mode( program_mode, m_merge ); break;
       case 'M': set_mode( program_mode, m_md5sum ); break;
-      case 'n': break;
+      case 'n': num_workers = getnum( arg, pn, 0, 1, max_workers ); break;
       case 'o': if( sarg == "-" ) to_stdout = true;
                 else { default_output_filename = sarg; } break;
-      case 'q': verbosity = -1; break;
-      case 'R': set_mode( program_mode, m_byte_repair ); break;
+      case 'q': cl_verbosity = verbosity = -1; break;
+      case 'r': recursive = 1; break;
+      case 'R': recursive = 2; break;
       case 's': set_mode( program_mode, m_split ); break;
       case 'S': if( arg[0] ) repeated_byte = getnum( arg, pn, 0, 0, 255 );
                 set_mode( program_mode, m_nrep_stats ); break;
@@ -907,20 +1102,23 @@ int main( const int argc, const char * const argv[] )
                 parse_range( arg, pn, range ); break;
       case 'Z': set_mode( program_mode, m_debug_byte_repair );
                 bad_byte.parse_bb( arg, pn ); break;
-      case opt_cm: set_mode( program_mode, m_clear_marking );
-                   cl_opts.ignore_marking = true; break;
-      case opt_du: set_mode( program_mode, m_dump );
-                   member_list.parse_ml( arg, pn, cl_opts ); break;
-      case opt_eer: cl_opts.ignore_empty = false; break;
+      case opt_chk: set_mode( program_mode, m_check );
+                    cblocks = getnum( arg, pn, 0, 1, max_k16 ); break;
+      case opt_dbg: debug_level = getnum( arg, pn, 0, 0, 3 ); break;
+      case opt_du:  set_mode( program_mode, m_dump );
+                    member_list.parse_ml( arg, pn, cl_opts ); break;
+      case opt_ff:  cl_fec_filename = sarg; break;
+      case opt_g16: cl_gf16 = true; break;
       case opt_lt:  cl_opts.loose_trailing = true; break;
       case opt_lzl: lzip_level = parse_lzip_level( arg, pn ); break;
       case opt_lzn: lzip_name = arg; break;
-      case opt_mer: cl_opts.ignore_marking = false; break;
+      case opt_nzr: set_mode( program_mode, m_nonzero_repair ); break;
       case opt_ref: reference_filename = arg; break;
       case opt_rem: set_mode( program_mode, m_remove );
                     member_list.parse_ml( arg, pn, cl_opts ); break;
-      case opt_st: set_mode( program_mode, m_strip );
-                   member_list.parse_ml( arg, pn, cl_opts ); break;
+      case opt_rnd: fec_random = true; break;
+      case opt_st:  set_mode( program_mode, m_strip );
+                    member_list.parse_ml( arg, pn, cl_opts ); break;
       default: internal_error( "uncaught option." );
       }
     } // end process options
@@ -951,34 +1149,59 @@ int main( const int argc, const char * const argv[] )
     case m_none: internal_error( "invalid operation." ); break;
     case m_alone_to_lz: break;
     case m_byte_repair:
-      one_file( filenames.size() );
+      one_file( filenames.size() ); no_to_stdout( to_stdout );
       return byte_repair( filenames[0], default_output_filename, cl_opts,
                           terminator, force );
-    case m_clear_marking:
-      at_least_one_file( filenames.size() );
-      return clear_marking( filenames, cl_opts );
+    case m_check: return gf_check( cblocks, cl_gf16, fec_random );
     case m_debug_byte_repair:
       one_file( filenames.size() );
-      return debug_byte_repair( filenames[0].c_str(), cl_opts, bad_byte, terminator );
+      return debug_byte_repair( filenames[0], cl_opts, bad_byte, terminator );
     case m_debug_decompress:
       one_file( filenames.size() );
-      return debug_decompress( filenames[0].c_str(), cl_opts, bad_byte, false );
+      return debug_decompress( filenames[0], cl_opts, bad_byte, false );
     case m_debug_delay:
       one_file( filenames.size() );
-      return debug_delay( filenames[0].c_str(), cl_opts, range, terminator );
+      return debug_delay( filenames[0], cl_opts, range, terminator );
     case m_decompress: break;
     case m_dump:
     case m_strip:
       at_least_one_file( filenames.size() );
       return dump_members( filenames, default_output_filename, cl_opts,
                       member_list, force, program_mode == m_strip, to_stdout );
+    case m_fec_create:
+      at_least_one_file( filenames.size() );
+      if( num_workers <= 0 ) num_workers = std::min( num_online, max_workers );
+      return fec_create( filenames, default_output_filename, fb_or_pct,
+                    cl_block_size, num_workers, debug_level, fctype, fec_level,
+                    recursive, cl_gf16, fec_random, force, to_stdout );
+    case m_fec_repair:
+    case m_fec_test:
+      at_least_one_file( filenames.size() );
+      return fec_test( filenames, cl_fec_filename, default_output_filename,
+                       recursive, force, cl_opts.ignore_errors,
+                       program_mode == m_fec_repair, to_stdout );
+    case m_fec_list:
+      if( filenames.empty() ) filenames.push_back("-");
+      return fec_list( filenames, cl_opts.ignore_errors );
+    case m_fec_dc:
+      one_file( filenames.size() );
+      return fec_dc( filenames[0], cl_fec_filename, cblocks );
+    case m_fec_dz:
+      one_file( filenames.size() );
+      return fec_dz( filenames[0], cl_fec_filename, range_vector );
+    case m_fec_dZ:
+      one_file( filenames.size() );
+      return fec_dZ( filenames[0], cl_fec_filename, delta, sector_size );
     case m_list: break;
     case m_md5sum: break;
-    case m_merge:
+    case m_merge: no_to_stdout( to_stdout );
       if( filenames.size() < 2 )
         { show_error( "You must specify at least 2 files.", 0, true ); return 1; }
       return merge_files( filenames, default_output_filename, cl_opts,
                           terminator, force );
+    case m_nonzero_repair:
+      at_least_one_file( filenames.size() );
+      return nonzero_repair( filenames, cl_opts );
     case m_nrep_stats:
       return print_nrep_stats( filenames, cl_opts, repeated_byte );
     case m_range_dec:
@@ -989,28 +1212,28 @@ int main( const int argc, const char * const argv[] )
       at_least_one_file( filenames.size() );
       return remove_members( filenames, cl_opts, member_list );
     case m_reproduce:
-      one_file( filenames.size() );
+      one_file( filenames.size() ); no_to_stdout( to_stdout );
       if( !reference_filename || !reference_filename[0] )
         { show_error( "You must specify a reference file.", 0, true ); return 1; }
       if( range.size() > 0 )
-        return debug_reproduce_file( filenames[0].c_str(), lzip_name,
+        return debug_reproduce_file( filenames[0], lzip_name,
                  reference_filename, cl_opts, range, sector_size, lzip_level );
       else
         return reproduce_file( filenames[0], default_output_filename, lzip_name,
                  reference_filename, cl_opts, lzip_level, terminator, force );
     case m_show_packets:
       one_file( filenames.size() );
-      return debug_decompress( filenames[0].c_str(), cl_opts, bad_byte, true );
+      return debug_decompress( filenames[0], cl_opts, bad_byte, true );
     case m_split:
-      one_file( filenames.size() );
+      one_file( filenames.size() ); no_to_stdout( to_stdout );
       return split_file( filenames[0], default_output_filename, cl_opts, force );
     case m_test: break;
     case m_unzcrash_bit:
       one_file( filenames.size() );
-      return lunzcrash_bit( filenames[0].c_str(), cl_opts );
+      return lunzcrash_bit( filenames[0], cl_opts );
     case m_unzcrash_block:
       one_file( filenames.size() );
-      return lunzcrash_block( filenames[0].c_str(), cl_opts, sector_size );
+      return lunzcrash_block( filenames[0], cl_opts, sector_size );
     }
     }
   catch( std::bad_alloc & ) { show_error( mem_msg ); cleanup_and_fail( 1 ); }
@@ -1048,9 +1271,10 @@ int main( const int argc, const char * const argv[] )
     {
     std::string input_filename;
     int infd;
+    const bool from_stdin = filenames[i] == "-";
 
     pp.set_name( filenames[i] );
-    if( filenames[i] == "-" )
+    if( from_stdin )
       {
       if( stdin_used ) continue; else stdin_used = true;
       infd = STDIN_FILENO;
@@ -1092,7 +1316,8 @@ int main( const int argc, const char * const argv[] )
       if( program_mode == m_alone_to_lz )
         tmp = alone_to_lz( infd, pp );
       else
-        tmp = decompress( cfile_size, infd, cl_opts, pp, program_mode == m_test );
+        tmp = decompress( cfile_size, infd, cl_opts, pp, from_stdin,
+                          program_mode == m_test );
       }
     catch( std::bad_alloc & ) { pp( mem_msg ); tmp = 1; }
     catch( Error & e ) { pp(); show_error( e.msg, errno ); tmp = 1; }

@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -50,9 +50,9 @@ uint8_t * read_file( const int infd, long * const file_sizep,
   while( file_size >= buffer_size - 20 && !errno )
     {
     if( buffer_size >= LONG_MAX )
-      { show_file_error( filename, "Input file is larger than LONG_MAX." );
+      { show_file_error( filename, large_file_msg );
         std::free( buffer ); return 0; }
-    buffer_size = ( buffer_size <= LONG_MAX / 2 ) ? 2 * buffer_size : LONG_MAX;
+    buffer_size = (buffer_size <= LONG_MAX / 2) ? 2 * buffer_size : LONG_MAX;
     uint8_t * const tmp = (uint8_t *)std::realloc( buffer, buffer_size );
     if( !tmp ) { std::free( buffer ); throw std::bad_alloc(); }
     buffer = tmp;
@@ -61,7 +61,7 @@ uint8_t * read_file( const int infd, long * const file_sizep,
     }
   if( errno )
     {
-    show_file_error( filename, "Error reading input file", errno );
+    show_file_error( filename, read_error_msg, errno );
     std::free( buffer ); return 0;
     }
   *file_sizep = file_size;
@@ -88,7 +88,7 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
   uint8_t * const buffer = read_file( infd, &file_size, pp.name() );
   if( !buffer ) return 1;
   if( file_size < lzma_header_size )
-    { show_file_error( pp.name(), "Input file is too short." );
+    { show_file_error( pp.name(), short_file_msg );
       std::free( buffer ); return 2; }
 
   if( buffer[0] != 93 )			// (45 * 2) + (9 * 0) + 3
@@ -100,7 +100,7 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
       show_file_error( pp.name(), "Input file has non-default LZMA properties." );
     std::free( buffer ); return 2;
     }
-  for( int i = 5; i < 13; ++i ) if( buffer[i] != 0xFF )
+  for( int i = 5; i < lzma_header_size; ++i ) if( buffer[i] != 0xFF )
     { show_file_error( pp.name(), "Input file is non-streamed." );
       std::free( buffer ); return 2; }
 
@@ -113,10 +113,12 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
   Lzip_header & header = *(Lzip_header *)( buffer + offset );
   header.set_magic();
   header.dictionary_size( dictionary_size );
+  buffer[lzma_header_size] = 0;			// reset first LZMA byte
   for( int i = 0; i < Lzip_trailer::size; ++i ) buffer[file_size++] = 0;
+  const long lzip_size = file_size - offset;
   // compute and fill trailer
   {
-  LZ_mtester mtester( buffer + offset, file_size - offset, dictionary_size );
+  LZ_mtester mtester( buffer + offset, lzip_size, dictionary_size );
   const int result = mtester.test_member();
   if( result == 1 && orig_dictionary_size > max_dictionary_size )
     { pp( "dictionary size is too large" ); std::free( buffer ); return 2; }
@@ -136,13 +138,13 @@ int alone_to_lz( const int infd, const Pretty_print & pp )
   trailer.member_size( mtester.member_position() );
   }
   // check converted member
-  LZ_mtester mtester( buffer + offset, file_size - offset, dictionary_size );
+  LZ_mtester mtester( buffer + offset, lzip_size, dictionary_size );
   if( mtester.test_member() != 0 || !mtester.finished() )
     { pp( "conversion failed" ); std::free( buffer ); return 2; }
-  if( writeblock( outfd, buffer + offset, file_size - offset ) != file_size - offset )
+  if( writeblock( outfd, buffer + offset, lzip_size ) != lzip_size )
     {
-    show_error( "Error writing output file", errno );
-    std::free( buffer ); return 1;
+    show_file_error( printable_name( output_filename, false ), wr_err_msg,
+      errno ); std::free( buffer ); return 1;
     }
   std::free( buffer );
   if( verbosity >= 1 ) std::fputs( "done\n", stderr );

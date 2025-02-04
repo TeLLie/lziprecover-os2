@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -28,8 +28,8 @@ class Lzip_index
       : dblock( dpos, dsize ), mblock( mpos, msize ),
         dictionary_size( dict_size ) {}
 
-    bool operator==( const Member & m ) const { return ( mblock == m.mblock ); }
-    bool operator!=( const Member & m ) const { return ( mblock != m.mblock ); }
+    bool operator==( const Member & m ) const { return mblock == m.mblock; }
+    bool operator!=( const Member & m ) const { return mblock != m.mblock; }
     };
 
   // member_vector only contains members with a valid header.
@@ -43,8 +43,7 @@ class Lzip_index
   bool check_header( const Lzip_header & header, const bool ignore_bad_ds );
   void set_errno_error( const char * const msg );
   void set_num_error( const char * const msg, unsigned long long num );
-  bool read_header( const int fd, Lzip_header & header, const long long pos,
-                    const bool ignore_marking = true );
+  bool read_header( const int fd, Lzip_header & header, const long long pos );
   bool read_trailer( const int fd, Lzip_trailer & trailer,
                      const long long pos );
   bool skip_gap( const int fd, unsigned long long & pos,
@@ -64,6 +63,14 @@ public:
   const std::string & error() const { return error_; }
   int retval() const { return retval_; }
   unsigned dictionary_size() const { return dictionary_size_; }
+
+  bool multi_empty() const	// multimember file with empty member(s)
+    {
+    if( member_vector.size() > 1 )
+      for( unsigned long i = 0; i < member_vector.size(); ++i )
+        if( member_vector[i].dblock.size() == 0 ) return true;
+    return false;
+    }
 
   bool operator==( const Lzip_index & li ) const
     {
@@ -94,3 +101,6 @@ public:
   unsigned dictionary_size( const long i ) const
     { return member_vector[i].dictionary_size; }
   };
+
+int seek_read( const int fd, uint8_t * const buf, const int size,
+               const long long pos );

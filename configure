@@ -1,12 +1,12 @@
 #! /bin/sh
 # configure script for Lziprecover - Data recovery tool for the lzip format
-# Copyright (C) 2009-2024 Antonio Diaz Diaz.
+# Copyright (C) 2009-2025 Antonio Diaz Diaz.
 #
 # This configure script is free software: you have unlimited permission
 # to copy, distribute, and modify it.
 
 pkgname=lziprecover
-pkgversion=1.24
+pkgversion=1.25
 progname=lziprecover
 srctrigger=doc/${pkgname}.texi
 
@@ -24,6 +24,7 @@ CXX=g++
 CPPFLAGS=
 CXXFLAGS='-Wall -W -O2'
 LDFLAGS=
+LIBS=-lpthread
 MAKEINFO=makeinfo
 
 # checking whether we are using GNU C++.
@@ -70,6 +71,7 @@ while [ $# != 0 ] ; do
 		echo "  CXXFLAGS=OPTIONS      command-line options for the C++ compiler [${CXXFLAGS}]"
 		echo "  CXXFLAGS+=OPTIONS     append options to the current value of CXXFLAGS"
 		echo "  LDFLAGS=OPTIONS       command-line options for the linker [${LDFLAGS}]"
+		echo "  LIBS=OPTIONS          libraries to pass to the linker [${LIBS}]"
 		echo "  MAKEINFO=NAME         makeinfo program to use [${MAKEINFO}]"
 		echo
 		exit 0 ;;
@@ -98,6 +100,7 @@ while [ $# != 0 ] ; do
 	CXXFLAGS=*)  CXXFLAGS=${optarg} ;;
 	CXXFLAGS+=*) CXXFLAGS="${CXXFLAGS} ${optarg}" ;;
 	LDFLAGS=*)    LDFLAGS=${optarg} ;;
+	LIBS=*)          LIBS="${optarg} ${LIBS}" ;;
 	MAKEINFO=*)  MAKEINFO=${optarg} ;;
 
 	--*)
@@ -109,7 +112,7 @@ while [ $# != 0 ] ; do
 		exit 1 ;;
 	esac
 
-	# Check if the option took a separate argument
+	# Check whether the option took a separate argument
 	if [ "${arg2}" = yes ] ; then
 		if [ $# != 0 ] ; then args="${args} \"$1\"" ; shift
 		else echo "configure: Missing argument to '${option}'" 1>&2
@@ -167,11 +170,12 @@ echo "CXX = ${CXX}"
 echo "CPPFLAGS = ${CPPFLAGS}"
 echo "CXXFLAGS = ${CXXFLAGS}"
 echo "LDFLAGS = ${LDFLAGS}"
+echo "LIBS = ${LIBS}"
 echo "MAKEINFO = ${MAKEINFO}"
 rm -f Makefile
 cat > Makefile << EOF
 # Makefile for Lziprecover - Data recovery tool for the lzip format
-# Copyright (C) 2009-2024 Antonio Diaz Diaz.
+# Copyright (C) 2009-2025 Antonio Diaz Diaz.
 # This file was generated automatically by configure. Don't edit.
 #
 # This Makefile is free software: you have unlimited permission
@@ -191,6 +195,7 @@ CXX = ${CXX}
 CPPFLAGS = ${CPPFLAGS}
 CXXFLAGS = ${CXXFLAGS}
 LDFLAGS = ${LDFLAGS}
+LIBS = ${LIBS}
 MAKEINFO = ${MAKEINFO}
 EOF
 cat "${srcdir}/Makefile.in" >> Makefile

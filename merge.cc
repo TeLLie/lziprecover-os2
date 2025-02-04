@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -65,7 +65,7 @@ bool file_crc( uint32_t & crc, const int infd, const char * const filename )
     {
     const int rd = readblock( infd, buffer, buffer_size );
     if( rd != buffer_size && errno )
-      { show_file_error( filename, "Error reading input file", errno );
+      { show_file_error( filename, read_error_msg, errno );
         error = true; break; }
     if( rd > 0 )
       crc32.update_buf( crc, buffer, rd );
@@ -140,25 +140,23 @@ bool diff_member( const long long mpos, const long long msize,
         continue;
       std::vector< Block > bv;
       long long partial_pos = 0;
-      const char * const filename1 = filenames[i1].c_str();
-      const char * const filename2 = filenames[i2].c_str();
       const int fd1 = infd_vector[i1], fd2 = infd_vector[i2];
       int begin = -1;			// begin of block. -1 means no block
       bool prev_equal = true;
-      if( !safe_seek( fd1, mpos, filename1 ) ||
-          !safe_seek( fd2, mpos, filename2 ) ) { error = true; break; }
+      if( !safe_seek( fd1, mpos, filenames[i1] ) ||
+          !safe_seek( fd2, mpos, filenames[i2] ) ) { error = true; break; }
 
       while( partial_pos < msize )
         {
         const int size = std::min( (long long)buffer_size, msize - partial_pos );
         const int rd = readblock( fd1, buffer1, size );
         if( rd != size && errno )
-          { show_file_error( filename1, "Error reading input file", errno );
+          { show_file_error( filenames[i1].c_str(), read_error_msg, errno );
             error = true; break; }
         if( rd > 0 )
           {
           if( readblock( fd2, buffer2, rd ) != rd )
-            { show_file_error( filename2, "Error reading input file", errno );
+            { show_file_error( filenames[i2].c_str(), read_error_msg, errno );
               error = true; break; }
           for( int i = 0; i < rd; ++i )
             {
@@ -267,8 +265,7 @@ int open_input_files( const std::vector< std::string > & filenames,
         }
       }
     if( tmp < min_member_size )
-      { show_file_error( filenames[i].c_str(), "Input file is too short." );
-        return 2; }
+      { show_file_error( filenames[i].c_str(), short_file_msg ); return 2; }
     if( i == 0 ) insize = tmp;
     else if( insize != tmp )
       { show_2file_error( "Sizes of input files", filenames[0].c_str(),
@@ -286,21 +283,20 @@ int open_input_files( const std::vector< std::string > & filenames,
 
   for( int i = 0; i < files; ++i )
     {
-    const char * const filename = filenames[i].c_str();
     const int infd = infd_vector[i];
     bool error = false;
     for( long j = 0; j < lzip_index.members(); ++j )
       {
       const long long mpos = lzip_index.mblock( j ).pos();
       const long long msize = lzip_index.mblock( j ).size();
-      if( !safe_seek( infd, mpos, filename ) ) return 1;
+      if( !safe_seek( infd, mpos, filenames[i] ) ) return 1;
       if( test_member_from_file( infd, msize ) != 0 ) { error = true; break; }
       }
     if( !error )
       {
       if( verbosity >= 1 )
         std::printf( "Input file '%s' has no errors. Recovery is not needed.\n",
-                     filename );
+                     filenames[i].c_str() );
       return 0;
       }
     }
@@ -366,10 +362,10 @@ bool try_merge_member2( const std::vector< std::string > & filenames,
       if( i1 == i2 || color_vector[i1] == color_vector[i2] ||
           color_done( color_vector, i1 ) ) continue;
       for( int bi = 0; bi < blocks; ++bi )
-        if( !safe_seek( infd_vector[i2], block_vector[bi].pos(), filenames[i2].c_str() ) ||
-            !safe_seek( outfd, block_vector[bi].pos(), output_filename.c_str() ) ||
-            !copy_file( infd_vector[i2], outfd, block_vector[bi].size() ) )
-          cleanup_and_fail( 1 );
+        if( !safe_seek( infd_vector[i2], block_vector[bi].pos(), filenames[i2] ) ||
+            !safe_seek( outfd, block_vector[bi].pos(), output_filename ) ||
+            !copy_file( infd_vector[i2], outfd, filenames[i2], output_filename,
+                        block_vector[bi].size() ) ) cleanup_and_fail( 1 );
       const int infd = infd_vector[i1];
       const int var = ( i1 * ( files - 1 ) ) + i2 - ( i2 > i1 ) + 1;
       for( int bi = 0; bi + 1 < blocks; ++bi )
@@ -380,10 +376,11 @@ bool try_merge_member2( const std::vector< std::string > & filenames,
                        var, variations, bi + 1, terminator );
           std::fflush( stdout ); pending_newline = true;
           }
-        if( !safe_seek( infd, block_vector[bi].pos(), filenames[i1].c_str() ) ||
-            !safe_seek( outfd, block_vector[bi].pos(), output_filename.c_str() ) ||
-            !copy_file( infd, outfd, block_vector[bi].size() ) ||
-            !safe_seek( outfd, mpos, output_filename.c_str() ) )
+        if( !safe_seek( infd, block_vector[bi].pos(), filenames[i1] ) ||
+            !safe_seek( outfd, block_vector[bi].pos(), output_filename ) ||
+            !copy_file( infd, outfd, filenames[i1], output_filename,
+                        block_vector[bi].size() ) ||
+            !safe_seek( outfd, mpos, output_filename ) )
           cleanup_and_fail( 1 );
         long long failure_pos = 0;
         if( test_member_from_file( outfd, msize, &failure_pos ) == 0 )
@@ -422,8 +419,7 @@ bool try_merge_member( const std::vector< std::string > & filenames,
     if( verbosity >= 2 )
       {
       long var = 0;
-      for( int i = 0; i < blocks; ++i )
-        var = ( var * files ) + file_idx[i];
+      for( int i = 0; i < blocks; ++i ) var = var * files + file_idx[i];
       std::printf( "  Trying variation %ld of %ld %c",
                    var + 1, variations, terminator );
       std::fflush( stdout ); pending_newline = true;
@@ -431,14 +427,13 @@ bool try_merge_member( const std::vector< std::string > & filenames,
     while( bi < blocks )
       {
       const int infd = infd_vector[file_idx[bi]];
-      if( !safe_seek( infd, block_vector[bi].pos(), filenames[file_idx[bi]].c_str() ) ||
-          !safe_seek( outfd, block_vector[bi].pos(), output_filename.c_str() ) ||
-          !copy_file( infd, outfd, block_vector[bi].size() ) )
-        cleanup_and_fail( 1 );
+      if( !safe_seek( infd, block_vector[bi].pos(), filenames[file_idx[bi]] ) ||
+          !safe_seek( outfd, block_vector[bi].pos(), output_filename ) ||
+          !copy_file( infd, outfd, filenames[file_idx[bi]], output_filename,
+                      block_vector[bi].size() ) ) cleanup_and_fail( 1 );
       ++bi;
       }
-    if( !safe_seek( outfd, mpos, output_filename.c_str() ) )
-      cleanup_and_fail( 1 );
+    if( !safe_seek( outfd, mpos, output_filename ) ) cleanup_and_fail( 1 );
     long long failure_pos = 0;
     if( test_member_from_file( outfd, msize, &failure_pos ) == 0 ) return true;
     while( bi > 0 && mpos + failure_pos < block_vector[bi-1].pos() ) --bi;
@@ -474,12 +469,12 @@ bool try_merge_member1( const std::vector< std::string > & filenames,
       {
       if( i1 == i2 || color_vector[i1] == color_vector[i2] ||
           color_done( color_vector, i1 ) ) continue;
+      if( !safe_seek( infd_vector[i1], pos, filenames[i1] ) ||
+          !safe_seek( infd_vector[i2], pos, filenames[i2] ) ||
+          !safe_seek( outfd, pos, output_filename ) ||
+          !copy_file( infd_vector[i2], outfd, filenames[i2], output_filename,
+                      size ) ) cleanup_and_fail( 1 );
       const int infd = infd_vector[i1];
-      if( !safe_seek( infd, pos, filenames[i1].c_str() ) ||
-          !safe_seek( infd_vector[i2], pos, filenames[i2].c_str() ) ||
-          !safe_seek( outfd, pos, output_filename.c_str() ) ||
-          !copy_file( infd_vector[i2], outfd, size ) )
-        cleanup_and_fail( 1 );
       const int var = ( i1 * ( files - 1 ) ) + i2 - ( i2 > i1 ) + 1;
       for( long long i = 0; i + 1 < size; ++i )
         {
@@ -489,10 +484,10 @@ bool try_merge_member1( const std::vector< std::string > & filenames,
                        var, variations, pos + i, terminator );
           std::fflush( stdout ); pending_newline = true;
           }
-        if( !safe_seek( outfd, pos + i, output_filename.c_str() ) ||
+        if( !safe_seek( outfd, pos + i, output_filename ) ||
             readblock( infd, &byte, 1 ) != 1 ||
             writeblock( outfd, &byte, 1 ) != 1 ||
-            !safe_seek( outfd, mpos, output_filename.c_str() ) )
+            !safe_seek( outfd, mpos, output_filename ) )
           cleanup_and_fail( 1 );
         long long failure_pos = 0;
         if( test_member_from_file( outfd, msize, &failure_pos ) == 0 )
@@ -509,11 +504,12 @@ bool try_merge_member1( const std::vector< std::string > & filenames,
 /* infd and outfd can refer to the same file if copying to a lower file
    position or if source and destination blocks don't overlap.
    max_size < 0 means no size limit. */
-bool copy_file( const int infd, const int outfd, const long long max_size )
+bool copy_file( const int infd, const int outfd, const std::string & iname,
+                const std::string & oname, const long long max_size )
   {
   const int buffer_size = 65536;
   // remaining number of bytes to copy
-  long long rest = ( ( max_size >= 0 ) ? max_size : buffer_size );
+  long long rest = (max_size >= 0) ? max_size : buffer_size;
   long long copied_size = 0;
   uint8_t * const buffer = new uint8_t[buffer_size];
   bool error = false;
@@ -524,12 +520,13 @@ bool copy_file( const int infd, const int outfd, const long long max_size )
     if( max_size >= 0 ) rest -= size;
     const int rd = readblock( infd, buffer, size );
     if( rd != size && errno )
-      { show_error( "Error reading input file", errno ); error = true; break; }
+      { show_file_error( printable_name( iname ), read_error_msg, errno );
+        error = true; break; }
     if( rd > 0 )
       {
       const int wr = writeblock( outfd, buffer, rd );
       if( wr != rd )
-        { show_error( "Error writing output file", errno );
+        { show_file_error( printable_name( oname, false ), wr_err_msg, errno );
           error = true; break; }
       copied_size += rd;
       }
@@ -537,7 +534,8 @@ bool copy_file( const int infd, const int outfd, const long long max_size )
     }
   delete[] buffer;
   if( !error && max_size >= 0 && copied_size != max_size )
-    { show_error( "Input file ends unexpectedly." ); error = true; }
+    { show_file_error( printable_name( iname ), "Input file ends unexpectedly." );
+      error = true; }
   return !error;
   }
 
@@ -545,7 +543,7 @@ bool copy_file( const int infd, const int outfd, const long long max_size )
 /* Return value: 0 = OK, 1 = bad msize, 2 = data error.
    'failure_pos' is relative to the beginning of the member. */
 int test_member_from_file( const int infd, const unsigned long long msize,
-                           long long * const failure_posp )
+                       long long * const failure_posp, bool * const nonzerop )
   {
   Range_decoder rdec( infd );
   Lzip_header header;
@@ -560,6 +558,7 @@ int test_member_from_file( const int infd, const unsigned long long msize,
     verbosity = -1;				// suppress all messages
     done = decoder.decode_member() == 0;
     verbosity = saved_verbosity;		// restore verbosity level
+    if( nonzerop ) *nonzerop = rdec.nonzero();
     if( done && rdec.member_position() == msize ) return 0;
     }
   if( failure_posp ) *failure_posp = rdec.member_position();
@@ -579,15 +578,15 @@ int merge_files( const std::vector< std::string > & filenames,
   const int retval =
     open_input_files( filenames, infd_vector, cl_opts, lzip_index, &in_stats );
   if( retval >= 0 ) return retval;
-  if( !safe_seek( infd_vector[0], 0, filenames[0].c_str() ) ) return 1;
+  if( !safe_seek( infd_vector[0], 0, filenames[0] ) ) return 1;
 
   const bool to_file = default_output_filename.size();
   output_filename =
     to_file ? default_output_filename : insert_fixed( filenames[0] );
   set_signal_handler();
   if( !open_outstream( force, true, true, false, to_file ) ) return 1;
-  if( !copy_file( infd_vector[0], outfd ) )		// copy whole file
-    cleanup_and_fail( 1 );
+  if( !copy_file( infd_vector[0], outfd, filenames[0], output_filename ) )
+    cleanup_and_fail( 1 );			// copy whole file
 
   for( long j = 0; j < lzip_index.members(); ++j )
     {
@@ -598,7 +597,7 @@ int merge_files( const std::vector< std::string > & filenames,
     // different color means members are different
     std::vector< int > color_vector( files, 0 );
     if( !diff_member( mpos, msize, filenames, infd_vector, block_vector,
-        color_vector ) || !safe_seek( outfd, mpos, output_filename.c_str() ) )
+        color_vector ) || !safe_seek( outfd, mpos, output_filename ) )
       cleanup_and_fail( 1 );
 
     if( block_vector.empty() )

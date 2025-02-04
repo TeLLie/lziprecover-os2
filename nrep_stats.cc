@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -44,11 +44,11 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
   unsigned long long lzma_size = 0;		// total size of LZMA data
   unsigned long best_pos = 0;
   int best_name = -1, retval = 0;
-  const bool count_all = ( repeated_byte < 0 || repeated_byte >= 256 );
+  const bool count_all = repeated_byte < 0 || repeated_byte >= 256;
   bool stdin_used = false;
   for( unsigned i = 0; i < filenames.size(); ++i )
     {
-    const bool from_stdin = ( filenames[i] == "-" );
+    const bool from_stdin = filenames[i] == "-";
     if( from_stdin ) { if( stdin_used ) continue; else stdin_used = true; }
     const char * const input_filename =
       from_stdin ? "(stdin)" : filenames[i].c_str();
@@ -68,13 +68,13 @@ int print_nrep_stats( const std::vector< std::string > & filenames,
       }
     const unsigned long long cdata_size = lzip_index.cdata_size();
     if( !fits_in_size_t( cdata_size ) )		// mmap uses size_t
-      { show_file_error( input_filename, "Input file is too large for mmap." );
+      { show_file_error( input_filename, large_file_msg );
         set_retval( retval, 1 ); close( infd ); continue; }
     const uint8_t * const buffer =
       (const uint8_t *)mmap( 0, cdata_size, PROT_READ, MAP_PRIVATE, infd, 0 );
     close( infd );
     if( buffer == MAP_FAILED )
-      { show_file_error( input_filename, "Can't mmap", errno );
+      { show_file_error( input_filename, mmap_msg, errno );
         set_retval( retval, 1 ); continue; }
     for( long j = 0; j < lzip_index.members(); ++j )
       {

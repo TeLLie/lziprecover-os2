@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -56,7 +56,7 @@ bool compare_member( const uint8_t * const mbuffer, const long msize,
   {
   MD5SUM md5sum;
   LZ_mtester mtester( mbuffer, msize, dictionary_size, -1, &md5sum );
-  bool error = ( mtester.test_member() != 0 || !mtester.finished() );
+  bool error = mtester.test_member() != 0 || !mtester.finished();
   if( !error )
     {
     md5_type new_digest;
@@ -103,22 +103,23 @@ long next_pct_pos( const Lzip_index & lzip_index, const long i, const int pct,
 
 /* Test 1-bit errors in LZMA streams in file.
    Unless verbosity >= 1, print only the bytes with interesting results. */
-int lunzcrash_bit( const char * const input_filename,
+int lunzcrash_bit( const std::string & input_filename,
                    const Cl_options & cl_opts )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename, &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename, lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
-  if( verbosity >= 2 ) printf( "Testing file '%s'\n", input_filename );
+  if( verbosity >= 2 ) printf( "Testing file '%s'\n", filename );
 
   const long long cdata_size = lzip_index.cdata_size();
   long positions = 0, decompressions = 0, successes = 0, failed_comparisons = 0;
-  int pct = ( cdata_size >= 1000 && isatty( STDERR_FILENO ) ) ? 0 : 100;
+  int pct = (cdata_size >= 1000 && isatty( STDERR_FILENO )) ? 0 : 100;
   for( long i = 0; i < lzip_index.members(); ++i )
     {
     const long long mpos = lzip_index.mblock( i ).pos();
@@ -127,8 +128,8 @@ int lunzcrash_bit( const char * const input_filename,
     if( !mbuffer ) return 1;
     const unsigned dictionary_size = lzip_index.dictionary_size( i );
     md5_type md5_orig;
-    if( !check_member( mbuffer, msize, dictionary_size, input_filename,
-                       md5_orig ) ) return 2;
+    if( !check_member( mbuffer, msize, dictionary_size, filename, md5_orig ) )
+      return 2;
     long pct_pos = next_pct_pos( lzip_index, i, pct );
     long pos = Lzip_header::size + 1, printed = 0;	// last pos printed
     const long end = msize - 20;
@@ -205,15 +206,16 @@ int lunzcrash_bit( const char * const input_filename,
 
   if( verbosity >= 0 )
     {
-    std::printf( "\n%9ld bytes tested\n%9ld total decompressions"
-                 "\n%9ld decompressions returned with zero status",
-                 positions, decompressions, successes );
+    std::printf( "\n%11s bytes tested\n%11s total decompressions"
+                 "\n%11s decompressions returned with zero status",
+                 format_num3( positions ), format_num3( decompressions ),
+                 format_num3( successes ) );
     if( successes > 0 )
       {
       if( failed_comparisons > 0 )
-        std::printf( ", of which\n%9ld comparisons failed\n",
-                     failed_comparisons );
-      else std::fputs( "\n          all comparisons passed\n", stdout );
+        std::printf( ", of which\n%11s comparisons failed\n",
+                     format_num3( failed_comparisons ) );
+      else std::fputs( "\n            all comparisons passed\n", stdout );
       }
     else std::fputc( '\n', stdout );
     }
@@ -223,22 +225,23 @@ int lunzcrash_bit( const char * const input_filename,
 
 /* Test zeroed blocks of given size in LZMA streams in file.
    Unless verbosity >= 1, print only the bytes with interesting results. */
-int lunzcrash_block( const char * const input_filename,
+int lunzcrash_block( const std::string & input_filename,
                      const Cl_options & cl_opts, const int sector_size )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename, &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename, lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
-  if( verbosity >= 2 ) printf( "Testing file '%s'\n", input_filename );
+  if( verbosity >= 2 ) printf( "Testing file '%s'\n", filename );
 
   const long long cdata_size = lzip_index.cdata_size();
   long decompressions = 0, successes = 0, failed_comparisons = 0;
-  int pct = ( cdata_size >= 1000 && isatty( STDERR_FILENO ) ) ? 0 : 100;
+  int pct = (cdata_size >= 1000 && isatty( STDERR_FILENO )) ? 0 : 100;
   uint8_t * const block = new uint8_t[sector_size];
   for( long i = 0; i < lzip_index.members(); ++i )
     {
@@ -250,8 +253,8 @@ int lunzcrash_block( const char * const input_filename,
     if( !mbuffer ) return 1;
     const unsigned dictionary_size = lzip_index.dictionary_size( i );
     md5_type md5_orig;
-    if( !check_member( mbuffer, msize, dictionary_size, input_filename,
-                       md5_orig ) ) return 2;
+    if( !check_member( mbuffer, msize, dictionary_size, filename, md5_orig ) )
+      return 2;
     long pct_pos = next_pct_pos( lzip_index, i, pct, sector_size );
     long pos = Lzip_header::size + 1;
     const long end = msize - sector_size - 20;
@@ -319,15 +322,16 @@ int lunzcrash_block( const char * const input_filename,
 
   if( verbosity >= 0 )
     {
-    std::printf( "\n%9ld blocks tested\n%9ld total decompressions"
-                 "\n%9ld decompressions returned with zero status",
-                 decompressions, decompressions, successes );
+    std::printf( "\n%11s blocks tested\n%11s total decompressions"
+                 "\n%11s decompressions returned with zero status",
+                 format_num3( decompressions ), format_num3( decompressions ),
+                 format_num3( successes ) );
     if( successes > 0 )
       {
       if( failed_comparisons > 0 )
-        std::printf( ", of which\n%9ld comparisons failed\n",
-                     failed_comparisons );
-      else std::fputs( "\n          all comparisons passed\n", stdout );
+        std::printf( ", of which\n%11s comparisons failed\n",
+                     format_num3( failed_comparisons ) );
+      else std::fputs( "\n            all comparisons passed\n", stdout );
       }
     else std::fputc( '\n', stdout );
     }
@@ -342,7 +346,7 @@ int md5sum_files( const std::vector< std::string > & filenames )
 
   for( unsigned i = 0; i < filenames.size(); ++i )
     {
-    const bool from_stdin = ( filenames[i] == "-" );
+    const bool from_stdin = filenames[i] == "-";
     if( from_stdin ) { if( stdin_used ) continue; else stdin_used = true; }
     const char * const input_filename = filenames[i].c_str();
     struct stat in_stats;				// not used
@@ -357,7 +361,8 @@ int md5sum_files( const std::vector< std::string > & filenames )
     while( true )
       {
       const int len = readblock( infd, buffer, buffer_size );
-      if( len != buffer_size && errno ) throw Error( "Read error" );
+      if( len != buffer_size && errno )
+        { show_file_error( input_filename, read_error_msg, errno ); return 1; }
       if( len > 0 ) md5sum.md5_update( buffer, len );
       if( len < buffer_size ) break;
       }
@@ -365,10 +370,15 @@ int md5sum_files( const std::vector< std::string > & filenames )
     if( close( infd ) != 0 )
       { show_file_error( input_filename, "Error closing input file", errno );
         return 1; }
+    if( verbosity < 0 ) continue;
 
     for( int i = 0; i < 16; ++i ) std::printf( "%02x", md5_digest[i] );
     std::printf( "  %s\n", input_filename );
     std::fflush( stdout );
+    if( std::ferror( stdout ) ) break;
     }
+  if( verbosity >= 0 && ( std::ferror( stdout ) || std::fclose( stdout ) != 0 ) )
+    { show_file_error( "(stdout)", wr_err_msg, errno );
+      set_retval( retval, 1 ); }
   return retval;
   }

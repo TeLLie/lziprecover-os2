@@ -1,6 +1,6 @@
 /* Unzcrash - Tests robustness of decompressors to corrupted data.
    Inspired by unzcrash.c from Julian Seward's bzip2.
-   Copyright (C) 2008-2024 Antonio Diaz Diaz.
+   Copyright (C) 2008-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <climits>		// SSIZE_MAX
+#include <climits>		// CHAR_BIT, SSIZE_MAX
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -53,8 +53,6 @@ namespace {
 
 const char * const program_name = "unzcrash";
 const char * invocation_name = program_name;		// default value
-
-int verbosity = 0;
 
 
 void show_help()
@@ -142,28 +140,29 @@ uint8_t * read_file( const char * const filename, long * const file_sizep )
 
   long buffer_size = 65536;
   uint8_t * buffer = (uint8_t *)std::malloc( buffer_size );
-  if( !buffer ) { show_error( mem_msg ); return 0; }
+  if( !buffer ) { show_file_error( filename, mem_msg ); return 0; }
   long file_size = std::fread( buffer, 1, buffer_size, f );
   while( file_size >= buffer_size || ( !std::ferror( f ) && !std::feof( f ) ) )
     {
     if( file_size >= buffer_size )	// may be false because of EINTR
       {
       if( buffer_size >= LONG_MAX )
-        { show_file_error( filename, "Input file is larger than LONG_MAX." );
+        { show_file_error( filename, large_file_msg );
           std::free( buffer ); return 0; }
-      buffer_size = ( buffer_size <= LONG_MAX / 2 ) ? 2 * buffer_size : LONG_MAX;
+      buffer_size = (buffer_size <= LONG_MAX / 2) ? 2 * buffer_size : LONG_MAX;
       uint8_t * const tmp = (uint8_t *)std::realloc( buffer, buffer_size );
-      if( !tmp ) { show_error( mem_msg ); std::free( buffer ); return 0; }
+      if( !tmp )
+        { show_file_error( filename, mem_msg ); std::free( buffer ); return 0; }
       buffer = tmp;
       }
     file_size += std::fread( buffer + file_size, 1, buffer_size - file_size, f );
     }
   if( std::ferror( f ) || !std::feof( f ) )
-    {
-    show_file_error( filename, "Error reading input file", errno );
-    std::free( buffer ); return 0;
-    }
-  std::fclose( f );
+    { show_file_error( filename, read_error_msg, errno );
+      std::free( buffer ); return 0; }
+  if( std::fclose( f ) != 0 )
+    { show_file_error( filename, "Error closing input file", errno );
+      std::free( buffer ); return 0; }
   *file_sizep = file_size;
   return buffer;
   }
@@ -173,13 +172,13 @@ class Bitset8			// 8 value bitset (1 to 8)
   {
   bool data[8];
   static bool valid_digit( const unsigned char ch )
-    { return ( ch >= '1' && ch <= '8' ); }
+    { return ch >= '1' && ch <= '8'; }
 
 public:
   Bitset8() { for( int i = 0; i < 8; ++i ) data[i] = true; }
 
   bool includes( const int i ) const
-    { return ( i >= 1 && i <= 8 && data[i-1] ); }
+    { return i >= 1 && i <= 8 && data[i-1]; }
 
   // Recognized formats: 1 1,2,3 1-4 1,3-5,8 1-3,5-8
   void parse_bs( const char * const arg, const char * const option_name )
@@ -355,7 +354,7 @@ int main( const int argc, const char * const argv[] )
   {
   enum Mode { m_block, m_byte, m_truncate };
   const char * mode_str[3] = { "block", "byte", "size" };
-  Bitset8 bits;		// if Bitset8::parse_bs not called test full byte
+  Bitset8 bits;		// if Bitset8::parse_bs not called, test full byte
   Bad_byte bad_byte;
   const char * zcmp_program = "zcmp";
   long pos = 0;
@@ -383,7 +382,7 @@ int main( const int argc, const char * const argv[] )
     { 'v', "verbose",   Arg_parser::no  },
     { 'V', "version",   Arg_parser::no  },
     { 'z', "zcmp",      Arg_parser::yes },
-    {  0 , 0,           Arg_parser::no  } };
+    { 0, 0,             Arg_parser::no  } };
 
   const Arg_parser parser( argc, argv, options );
   if( parser.error().size() )				// bad option
@@ -398,15 +397,15 @@ int main( const int argc, const char * const argv[] )
     const char * const arg = parser.argument( argind ).c_str();
     switch( code )
       {
-      case 'h': show_help(); return 0;
       case 'b': bits.parse_bs( arg, pn ); program_mode = m_byte; break;
       case 'B': if( arg[0] ) parse_block( arg, pn, block_size, block_value );
                 program_mode = m_block; break;
       case 'd': delta = getnum( arg, pn, block_size, 1, INT_MAX ); break;
       case 'e': bad_byte.parse_bb( arg, pn ); break;
+      case 'h': show_help(); return 0;
       case 'n': check = false; break;
       case 'p': pos = getnum( arg, pn, block_size, -LONG_MAX, LONG_MAX ); break;
-      case 'q': verbosity = -1; break;
+      case 'q': cl_verbosity = verbosity = -1; break;
       case 's': max_size = getnum( arg, pn, block_size, -LONG_MAX, LONG_MAX ); break;
       case 't': program_mode = m_truncate; break;
       case 'v': if( verbosity < 4 ) ++verbosity; break;
@@ -419,11 +418,12 @@ int main( const int argc, const char * const argv[] )
   if( parser.arguments() - argind != 2 )
     {
     if( verbosity >= 0 )
-      std::fprintf( stderr, "Usage: %s 'lzip -t' file.lz\n", invocation_name );
+      std::fprintf( stderr, "Usage: %s [options] 'lzip -t' file.lz\n",
+                    invocation_name );
     return 1;
     }
 
-  if( delta <= 0 ) delta = ( program_mode == m_block ) ? block_size : 1;
+  if( delta <= 0 ) delta = (program_mode == m_block) ? block_size : 1;
 
   const char * const command = parser.argument( argind ).c_str();
   std::vector< std::string > command_args;
@@ -498,7 +498,7 @@ int main( const int argc, const char * const argv[] )
       ( max_size < 0 && -max_size >= file_size - pos ) )
     { show_error( "Nothing to do; domain is empty." ); return 0; }
   if( max_size < 0 ) max_size += file_size - pos;
-  const long end = ( ( max_size < file_size - pos ) ? pos + max_size : file_size );
+  const long end = (max_size < file_size - pos) ? pos + max_size : file_size;
   if( bad_byte.pos >= file_size )
     { show_option_error( bad_byte.argument, "Position is beyond end of file in",
                          bad_byte.option_name ); return 1; }
@@ -532,7 +532,7 @@ int main( const int argc, const char * const argv[] )
       }
   else if( program_mode == m_block )
     {
-    uint8_t * block = (uint8_t *)std::malloc( block_size );
+    uint8_t * const block = (uint8_t *)std::malloc( block_size );
     if( !block ) { show_error( mem_msg ); return 1; }
     for( long i = pos; i < end; i += std::min( delta, end - i ) )
       {
@@ -611,17 +611,18 @@ int main( const int argc, const char * const argv[] )
 
   if( verbosity >= 0 )
     {
-    std::fprintf( stderr, "\n%9ld %ss tested\n%9ld total decompressions"
-                          "\n%9ld decompressions returned with zero status",
-                  positions, mode_str[program_mode], decompressions, successes );
+    std::fprintf( stderr, "\n%11s %ss tested\n%11s total decompressions"
+                          "\n%11s decompressions returned with zero status",
+                  format_num3( positions ), mode_str[program_mode],
+                  format_num3( decompressions ), format_num3( successes ) );
     if( successes > 0 )
       {
       if( zcmp_command.empty() )
-        std::fputs( "\n          comparisons disabled\n", stderr );
+        std::fputs( "\n            comparisons disabled\n", stderr );
       else if( failed_comparisons > 0 )
-        std::fprintf( stderr, ", of which\n%9ld comparisons failed\n",
-                      failed_comparisons );
-      else std::fputs( "\n          all comparisons passed\n", stderr );
+        std::fprintf( stderr, ", of which\n%11s comparisons failed\n",
+                      format_num3( failed_comparisons ) );
+      else std::fputs( "\n            all comparisons passed\n", stderr );
       }
     else std::fputc( '\n', stderr );
     }

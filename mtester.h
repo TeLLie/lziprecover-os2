@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -53,12 +53,15 @@ public:
     return p;
     }
 
-  void load()
+  bool load()
     {
     code = 0;
     range = 0xFFFFFFFFU;
+    // check first byte of the LZMA stream without reading it
+    if( buffer[pos] != 0 ) return false;
     get_byte();			// discard first byte of the LZMA stream
     for( int i = 0; i < 4; ++i ) code = ( code << 8 ) | get_byte();
+    return true;
     }
 
   void normalize()
@@ -76,7 +79,7 @@ public:
       range >>= 1;
 //      symbol <<= 1;
 //      if( code >= range ) { code -= range; symbol |= 1; }
-      const bool bit = ( code >= range );
+      const bool bit = code >= range;
       symbol <<= 1; symbol += bit;
       code -= range & ( 0U - bit );
       }
@@ -299,14 +302,14 @@ class LZ_mtester
     bool fast, fast2;
     if( lpos > distance )
       {
-      fast = ( len < dictionary_size - lpos );
-      fast2 = ( fast && len <= lpos - i );
+      fast = len < dictionary_size - lpos;
+      fast2 = fast && len <= lpos - i;
       }
     else
       {
       i += dictionary_size;
-      fast = ( len < dictionary_size - i );	// (i == pos) may happen
-      fast2 = ( fast && len <= i - lpos );
+      fast = len < dictionary_size - i;		// (i == pos) may happen
+      fast2 = fast && len <= i - lpos;
       }
     if( fast )					// no wrap
       {
@@ -378,8 +381,8 @@ public:
 
   const uint8_t * get_buffers( const uint8_t ** const prev_bufferp,
                                int * const sizep, int * const prev_sizep ) const
-    { *sizep = ( pos_wrapped && pos == 0 ) ? dictionary_size : pos;
-      *prev_sizep = ( pos_wrapped && pos > 0 ) ? dictionary_size - pos : 0;
+    { *sizep = (pos_wrapped && pos == 0) ? dictionary_size : pos;
+      *prev_sizep = (pos_wrapped && pos > 0) ? dictionary_size - pos : 0;
       *prev_bufferp = buffer + pos; return buffer; }
 
   void duplicate_buffer( uint8_t * const buffer2 );

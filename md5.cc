@@ -1,6 +1,6 @@
 /* Functions to compute MD5 message digest of memory blocks according to the
    definition of MD5 in RFC 1321 from April 1992.
-   Copyright (C) 2020-2024 Antonio Diaz Diaz.
+   Copyright (C) 2020-2025 Antonio Diaz Diaz.
 
    This library is free software. Redistribution and use in source and
    binary forms, with or without modification, are permitted provided
@@ -178,7 +178,7 @@ void MD5SUM::md5_finish( md5_type & digest )
   md5_update( padding, len );		// pad to 56 mod 64
   md5_update( bits, 8 );		// append data length in bits
 
-  for( int i = 0, j = 0; i < 4; i++, j += 4 )	// store state in digest
+  for( int i = 0, j = 0; i < 4; ++i, j += 4 )	// store state in digest
     {
     digest[j  ] = (uint8_t)state[i];
     digest[j+1] = (uint8_t)(state[i] >>  8);

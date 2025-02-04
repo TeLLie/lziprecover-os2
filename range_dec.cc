@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -53,7 +53,7 @@ bool decompress_member( const int infd, const Cl_options & cl_opts,
   if( verbosity >= 2 ) pp();
 
   LZ_decoder decoder( rdec, dictionary_size, outfd, outskip, outend );
-  const int result = decoder.decode_member( cl_opts, pp );
+  const int result = decoder.decode_member( pp, cl_opts.ignore_errors );
   if( result != 0 )
     {
     if( verbosity >= 0 && result <= 2 )
@@ -94,7 +94,7 @@ const char * format_num( unsigned long long num,
   static int current = 0;
   static bool si = true;
 
-  if( set_prefix ) si = ( set_prefix > 0 );
+  if( set_prefix ) si = set_prefix > 0;
   unsigned long long den = 1;
   const unsigned factor = si ? 1000 : 1024;
   char * const buf = buffer[current++]; current %= buffers;
@@ -109,15 +109,6 @@ const char * format_num( unsigned long long num,
   else
     snprintf( buf, bufsize, "%3.2f %s", (double)num / den, p );
   return buf;
-  }
-
-
-bool safe_seek( const int fd, const long long pos,
-                const char * const filename )
-  {
-  if( lseek( fd, pos, SEEK_SET ) == pos ) return true;
-  show_file_error( filename, "Seek error", errno );
-  return false;
   }
 
 
@@ -141,7 +132,8 @@ int range_decompress( const std::string & input_filename,
   if( range.end() > udata_size )
     range.size( std::max( 0LL, udata_size - range.pos() ) );
   if( range.size() <= 0 )
-    { if( udata_size > 0 ) show_file_error( filename, "Nothing to do." );
+    { if( udata_size > 0 )
+        show_file_error( filename, "Nothing to do; range is empty." );
       return 0; }
 
   if( to_stdout || default_output_filename.empty() ) outfd = STDOUT_FILENO;
@@ -170,7 +162,7 @@ int range_decompress( const std::string & input_filename,
       const long long outskip = std::max( 0LL, range.pos() - db.pos() );
       const long long outend = std::min( db.size(), range.end() - db.pos() );
       const long long mpos = lzip_index.mblock( i ).pos();
-      if( !safe_seek( infd, mpos, filename ) ) cleanup_and_fail( 1 );
+      if( !safe_seek( infd, mpos, input_filename ) ) cleanup_and_fail( 1 );
       if( !decompress_member( infd, cl_opts, pp, mpos, outskip, outend ) )
         { if( cl_opts.ignore_errors ) error = true; else cleanup_and_fail( 2 ); }
       pp.reset();

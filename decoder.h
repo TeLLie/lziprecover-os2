@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@ class Range_decoder
   uint32_t range;
   const int infd;		// input file descriptor
   bool at_stream_end;
+  bool nonzero_;
 
   bool read_block();
 
@@ -42,11 +43,12 @@ public:
     code( 0 ),
     range( 0xFFFFFFFFU ),
     infd( ifd ),
-    at_stream_end( false )
+    at_stream_end( false ), nonzero_( false )
     {}
 
   ~Range_decoder() { delete[] buffer; }
 
+  bool nonzero() const { return nonzero_; }
   unsigned get_code() const { return code; }
   bool finished() { return pos >= stream_pos && !read_block(); }
 
@@ -106,12 +108,14 @@ public:
     return false;
     }
 
-  bool load( const bool ignore_marking = true )
+  bool load( const bool ignore_nonzero )
     {
     code = 0;
     range = 0xFFFFFFFFU;
-    // check and discard first byte of the LZMA stream
-    if( get_byte() != 0 && !ignore_marking ) return false;
+    // check first byte of the LZMA stream without reading it
+    nonzero_ = buffer[pos] != 0;
+    if( nonzero_ && !ignore_nonzero ) return false;
+    get_byte();			// discard first byte of the LZMA stream
     for( int i = 0; i < 4; ++i ) code = ( code << 8 ) | get_byte();
     return true;
     }
@@ -131,7 +135,7 @@ public:
       range >>= 1;
 //      symbol <<= 1;
 //      if( code >= range ) { code -= range; symbol |= 1; }
-      const bool bit = ( code >= range );
+      const bool bit = code >= range;
       symbol <<= 1; symbol += bit;
       code -= range & ( 0U - bit );
       }
@@ -305,7 +309,7 @@ class LZ_decoder
   unsigned long long stream_position() const
     { return partial_data_pos + stream_pos; }
   void flush_data();
-  int check_trailer( const Pretty_print & pp, const bool ignore_empty ) const;
+  bool check_trailer( const Pretty_print & pp ) const;
 
   uint8_t peek_prev() const
     { return buffer[((pos > 0) ? pos : dictionary_size)-1]; }
@@ -329,14 +333,14 @@ class LZ_decoder
     bool fast, fast2;
     if( lpos > distance )
       {
-      fast = ( len < dictionary_size - lpos );
-      fast2 = ( fast && len <= lpos - i );
+      fast = len < dictionary_size - lpos;
+      fast2 = fast && len <= lpos - i;
       }
     else
       {
       i += dictionary_size;
-      fast = ( len < dictionary_size - i );	// (i == pos) may happen
-      fast2 = ( fast && len <= i - lpos );
+      fast = len < dictionary_size - i;		// (i == pos) may happen
+      fast2 = fast && len <= i - lpos;
       }
     if( fast )					// no wrap
       {
@@ -381,7 +385,7 @@ public:
   unsigned crc() const { return crc_ ^ 0xFFFFFFFFU; }
   unsigned long long data_position() const { return partial_data_pos + pos; }
 
-  int decode_member( const Cl_options & cl_opts, const Pretty_print & pp );
+  int decode_member( const Pretty_print & pp, const bool ignore_nonzero );
   int decode_member()
-    { return decode_member( Cl_options(), Pretty_print( "" ) ); }
+    { return decode_member( Pretty_print( "" ), true ); }
   };

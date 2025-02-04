@@ -1,5 +1,5 @@
 /* Lziprecover - Data recovery tool for the lzip format
-   Copyright (C) 2009-2024 Antonio Diaz Diaz.
+   Copyright (C) 2009-2025 Antonio Diaz Diaz.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -440,7 +440,7 @@ int reproduce_member( uint8_t * const mbuffer, const long msize,
     (const uint8_t *)mmap( 0, rsize, PROT_READ, MAP_PRIVATE, rfd, 0 );
   close( rfd );
   if( rbuf == MAP_FAILED )
-    { show_file_error( reference_filename, "Can't mmap", errno );
+    { show_file_error( reference_filename, mmap_msg, errno );
       return fatal( 1 ); }
 
   const Lzip_header & header = *(const Lzip_header *)mbuffer;
@@ -457,9 +457,9 @@ int reproduce_member( uint8_t * const mbuffer, const long msize,
 
   const long offset = match_file( *master, rbuf, rsize, reference_filename );
   if( offset < 0 ) { delete master; return 2; }		// no match
-  // Reference data from offset must be at least as large as zeroed sector
-  // minus member trailer if trailer is inside the zeroed sector.
-  const int t = ( begin + size >= msize ) ? 16 + Lzip_trailer::size : 0;
+  /* Reference data from offset must be at least as large as zeroed sector
+     minus member trailer if trailer is inside the zeroed sector. */
+  const int t = (begin + size >= msize) ? 16 + Lzip_trailer::size : 0;
   if( rsize - offset < size - t )
     { show_file_error( reference_filename, "Not enough reference data after match." );
       delete master; return 2; }
@@ -482,7 +482,7 @@ int reproduce_member( uint8_t * const mbuffer, const long msize,
         std::fflush( stdout ); pending_newline = true;
         }
       const bool level0 = level == '0';
-      const bool auto0 = ( level0 && lzip_level != '0' );
+      const bool auto0 = level0 && lzip_level != '0';
       int ret = try_reproduce( mbuffer, msize, dsize, good_dsize, begin, end,
                                rbuf, rsize, offset, dictionary_size,
                 level0 ? lzip0_argv : lzip_argv, md5sump, terminator, auto0 );
@@ -550,7 +550,7 @@ int reproduce_file( const std::string & input_filename,
                    i + 1, lzip_index.members(), terminator );
       std::fflush( stdout ); pending_newline = true;
       }
-    if( !safe_seek( infd, mpos, filename ) ) return 1;
+    if( !safe_seek( infd, mpos, input_filename ) ) return 1;
     long long failure_pos = 0;
     if( test_member_from_file( infd, msize, &failure_pos ) == 0 )
       continue;				// member is not damaged
@@ -567,7 +567,7 @@ int reproduce_file( const std::string & input_filename,
     uint8_t * const mbuffer_base = (uint8_t *)mmap( 0, msize + mpos_rem,
               PROT_READ | PROT_WRITE, MAP_PRIVATE, infd, mpos - mpos_rem );
     if( mbuffer_base == MAP_FAILED )
-      { show_file_error( filename, "Can't mmap", errno ); return 1; }
+      { show_file_error( filename, mmap_msg, errno ); return 1; }
     uint8_t * const mbuffer = mbuffer_base + mpos_rem;
     long size = 0;
     uint8_t value = 0;
@@ -592,11 +592,11 @@ int reproduce_file( const std::string & input_filename,
       {
       if( outfd < 0 )			// first damaged member reproduced
         {
-        if( !safe_seek( infd, 0, filename ) ) return 1;
+        if( !safe_seek( infd, 0, input_filename ) ) return 1;
         set_signal_handler();
         if( !open_outstream( true, true, false, true, to_file ) ) return 1;
-        if( !copy_file( infd, outfd ) )		// copy whole file
-          cleanup_and_fail( 1 );
+        if( !copy_file( infd, outfd, input_filename, output_filename ) )
+          cleanup_and_fail( 1 );		// copy whole file
         }
       if( seek_write( outfd, mbuffer + begin, size, mpos + begin ) != size )
         { show_file_error( output_filename.c_str(), "Error writing file", errno );
@@ -627,7 +627,8 @@ int reproduce_file( const std::string & input_filename,
       std::fputs( "One member reproduced."
                   " Copy of input file still contains errors.\n", stdout );
     else
-      std::fputs( "Copy of input file reproduced successfully.\n", stdout );
+      std::printf( "Repaired copy of '%s' written to '%s'\n",
+                   filename, output_filename.c_str() );
     }
   return 0;
   }
@@ -635,24 +636,25 @@ int reproduce_file( const std::string & input_filename,
 
 /* Passes a 0 terminator to other functions to prevent intramember feedback.
    Exits only in case of fatal error. (reference file too large, etc). */
-int debug_reproduce_file( const char * const input_filename,
+int debug_reproduce_file( const std::string & input_filename,
                           const char * const lzip_name,
                           const char * const reference_filename,
                           const Cl_options & cl_opts, const Block & range,
                           const int sector_size, const int lzip_level )
   {
+  const char * const filename = input_filename.c_str();
   struct stat in_stats;				// not used
-  const int infd = open_instream( input_filename, &in_stats, false, true );
+  const int infd = open_instream( filename, &in_stats, false, true );
   if( infd < 0 ) return 1;
 
   const Lzip_index lzip_index( infd, cl_opts );
   if( lzip_index.retval() != 0 )
-    { show_file_error( input_filename, lzip_index.error().c_str() );
+    { show_file_error( filename, lzip_index.error().c_str() );
       return lzip_index.retval(); }
 
   const long long cdata_size = lzip_index.cdata_size();
   if( range.pos() >= cdata_size )
-    { show_file_error( input_filename, "Range is beyond end of last member." );
+    { show_file_error( filename, "Range is beyond end of last member." );
       return 1; }
 
   const long page_size = std::max( 1L, sysconf( _SC_PAGESIZE ) );
@@ -669,7 +671,7 @@ int debug_reproduce_file( const char * const input_filename,
     const long long msize = lzip_index.mblock( i ).size();
     if( !range.overlaps( mpos, msize ) ) continue;
     if( !fits_in_size_t( msize + page_size ) )		// mmap uses size_t
-      { show_file_error( input_filename,
+      { show_file_error( filename,
           "Input file contains member too large for mmap." ); return 1; }
     const long long dsize = lzip_index.dblock( i ).size();
     const unsigned dictionary_size = lzip_index.dictionary_size( i );
@@ -686,14 +688,14 @@ int debug_reproduce_file( const char * const input_filename,
       uint8_t * const mbuffer_base = (uint8_t *)mmap( 0, msize + mpos_rem,
                 PROT_READ | PROT_WRITE, MAP_PRIVATE, infd, mpos - mpos_rem );
       if( mbuffer_base == MAP_FAILED )
-        { show_file_error( input_filename, "Can't mmap", errno ); return 1; }
+        { show_file_error( filename, mmap_msg, errno ); return 1; }
       uint8_t * const mbuffer = mbuffer_base + mpos_rem;
       if( !md5_valid )
         {
         if( verbosity >= 0 )	// give a clue of the range being tested
           { std::printf( "Reproducing:    %s\nReference file: %s\nTesting "
                          "sectors of size %llu at file positions %llu to %llu\n",
-                         input_filename, reference_filename,
+                         filename, reference_filename,
                          std::min( (long long)sector_size, rm_end - sector_pos ),
                          sector_pos, rm_end - 1 ); std::fflush( stdout ); }
         md5_valid = true; compute_md5( mbuffer, msize, md5_digest_c );
@@ -718,7 +720,7 @@ int debug_reproduce_file( const char * const input_filename,
       long size = 0;
       uint8_t value = 0;
       const long begin =
-        zeroed_sector_pos( mbuffer, msize, input_filename, &size, &value );
+        zeroed_sector_pos( mbuffer, msize, filename, &size, &value );
       if( begin < 0 ) return 2;
       MD5SUM md5sum;
       const int ret = reproduce_member( mbuffer, msize, dsize, lzip_name,
@@ -762,18 +764,18 @@ int debug_reproduce_file( const char * const input_filename,
 done:
   if( verbosity >= 0 )
     {
-    std::printf( "\n%9ld sectors tested"
-                 "\n%9ld reproductions returned with zero status",
-                 positions, successes );
+    std::printf( "\n%11s sectors tested"
+                 "\n%11s reproductions returned with zero status",
+                 format_num3( positions ), format_num3( successes ) );
     if( successes > 0 )
       {
       if( failed_comparisons > 0 )
-        std::printf( ", of which\n%9ld comparisons failed\n",
-                     failed_comparisons );
-      else std::fputs( "\n          all comparisons passed\n", stdout );
+        std::printf( ", of which\n%11s comparisons failed\n",
+                     format_num3( failed_comparisons ) );
+      else std::fputs( "\n            all comparisons passed\n", stdout );
       if( alternative_reproductions > 0 )
-        std::printf( "%9ld alternative reproductions found\n",
-                     alternative_reproductions );
+        std::printf( "%11s alternative reproductions found\n",
+                     format_num3( alternative_reproductions ) );
       }
     else std::fputc( '\n', stdout );
     if( fatal_retval )
